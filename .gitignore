@@ -63,3 +63,6 @@ logs/
 .fastRequest
 ###jrebel ###
 rebel.xml
+
+### Mac os file ###
+.DS_Store

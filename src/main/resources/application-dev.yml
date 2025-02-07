@@ -1,0 +1,24 @@
+wx:
+  mp:
+    configs:
+      - appId: wxbe045ae960147da1
+        secret: 6a250ac59d3f4c775f99a288a904bc6d
+        token: hcliu
+        aesKey: LHznZTiUOlwohmxktYHFlFQJYnQMeCFPCw8J2QsUHGK
+
+server:
+  port: 80
+
+
+notice:
+  configs:
+    - brakId: VVtPqTFKkTfBFLorEvLDX3
+
+lottery:
+  APPID: vinnsglluwk0brol
+  APPSECRET: HbKwaYgoIr1DhFFZ9rFoHEHhHZB1bYUT
+
+spring:
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher

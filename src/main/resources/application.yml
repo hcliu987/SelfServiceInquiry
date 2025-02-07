@@ -1,0 +1,48 @@
+wx:
+  mp:
+    configs:
+      - appId: wx738d5cd928816fa0
+        secret: 4e262bf21fb03bc20a5140ed2a888f5f
+        token: hcliu
+        aesKey: LHznZTiUOlwohmxktYHFlFQJYnQMeCFPCw8J2QsUHGK
+server:
+  port: 80
+
+
+notice:
+  brakId: VVtPqTFKkTfBFLorEvLDX3
+
+lottery:
+  APPID: vinnsglluwk0brol
+  APPSECRET: HbKwaYgoIr1DhFFZ9rFoHEHhHZB1bYUT
+
+spring:
+  profiles:
+    active: dev
+  redis:
+    host: 118.89.200.61
+    port: 6379
+    password: 271886
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+api:
+  search:
+    base-url: http://m.kkqws.com
+    juzi-path: /v/api/getJuzi
+    xiaoyu-path: /v/api/getXiaoyu
+    search-path: /v/api/search
+    token: i69
+notification:
+  bark:
+    key: ${BARK_KEY:qEnhyuDqQAcAtCKRCBWJ4e}
+  ftqq:
+    key: ${FTQQ_KEY:SCT142384Tq64Jxx4Jde2xQDQjct36FD4Z}
+  pushdeer:
+    key: ${PUSHDEER_KEY:PDU21229TiqefGW5MIxU3C69S5KhM5efHWhtKpCUP}
+  pushplus:
+    token: ${PUSHPLUS_TOKEN:00e469292f6e4bee87b718d578417329}
+qinglong:
+  url: http://118.89.200.61:5700
+  client-id: RDPeU_1p6WlL
+  client-secret: s5PP776sq_RhdPIy3y9nygMW

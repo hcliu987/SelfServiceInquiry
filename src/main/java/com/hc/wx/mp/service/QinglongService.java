@@ -69,10 +69,11 @@ public class QinglongService {
                 log.info("青龙token刷新成功，过期时间：{}", tokenExpiration);
                 return token;
             }
-            throw new RuntimeException("获取青龙token失败: " + response);
+            log.error("获取青龙token失败，响应内容：{}", response);
+            throw new RuntimeException("获取青龙token失败，服务返回非200状态码");
         } catch (Exception e) {
-            log.error("获取青龙token异常", e);
-            throw new RuntimeException("获取青龙token失败", e);
+            log.error("获取青龙token异常：{}", e.getMessage());
+            throw new RuntimeException("获取青龙token失败：" + e.getMessage(), e);
         }
     }
 
@@ -84,7 +85,6 @@ public class QinglongService {
             envData.put("value", value);
             envData.put("remarks", remarks);
 
-            // 查询是否存在
             String searchUrl = baseUrl + "/open/envs?searchValue=" + value;
             String searchResponse = HttpRequest.get(searchUrl)
                     .header("Authorization", "Bearer " + token)
@@ -100,8 +100,8 @@ public class QinglongService {
                 updateExistingEnv(envData, existingEnvs.get(0), token);
             }
         } catch (Exception e) {
-            log.error("更新环境变量失败: name={}, value={}", name, value, e);
-            throw new RuntimeException("更新环境变量失败", e);
+            log.error("更新环境变量失败：name={}，错误原因：{}", name, e.getMessage());
+            throw new RuntimeException("更新环境变量失败：" + e.getMessage(), e);
         }
     }
 

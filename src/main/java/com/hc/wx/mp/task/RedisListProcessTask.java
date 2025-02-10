@@ -44,33 +44,29 @@ public class RedisListProcessTask {
         try {
             Long listSize = redisTemplate.opsForList().size(REDIS_KEY);
             if (listSize == null || listSize == 0) {
-                log.warn("Redis列表为空");
+                log.info("Redis列表为空，本次处理结束");
                 return;
             }
 
             int startIndex = currentHour.get() * BATCH_SIZE;
-            int endIndex;
-            
-            // 判断是否是最后一批数据
-            if ((startIndex + BATCH_SIZE) >= listSize) {
-                endIndex = listSize.intValue() - 1;
-                log.info("处理最后一批数据，索引范围：{} - {}", startIndex, endIndex);
-            } else {
-                endIndex = startIndex + BATCH_SIZE - 1;
-                log.info("处理第{}小时数据，索引范围：{} - {}", currentHour.get() + 1, startIndex, endIndex);
+            if (startIndex >= listSize) {
+                log.info("当前小时批次索引{}已超过列表大小{}，等待下一轮处理", startIndex, listSize);
+                return;
             }
 
-            // 获取当前批次的数据
+            int endIndex = Math.min(startIndex + BATCH_SIZE - 1, listSize.intValue() - 1);
+            log.info("开始处理第{}小时数据，索引范围：{} - {}", currentHour.get() + 1, startIndex, endIndex);
+
             List<String> batchData = redisTemplate.opsForList().range(REDIS_KEY, startIndex, endIndex);
             if (batchData != null && !batchData.isEmpty()) {
                 processBatch(batchData);
+                currentHour.incrementAndGet();
+                log.info("完成第{}小时数据处理，处理数据量：{}", currentHour.get(), batchData.size());
             }
 
-            currentHour.incrementAndGet();
-            log.info("完成第{}小时数据处理，共处理{}条数据", currentHour.get(), batchData != null ? batchData.size() : 0);
-
         } catch (Exception e) {
-            log.error("处理Redis列表数据失败", e);
+            log.error("处理Redis列表数据失败：{}", e.getMessage(), e);
+            throw new RuntimeException("处理Redis列表数据失败", e);
         }
     }
 

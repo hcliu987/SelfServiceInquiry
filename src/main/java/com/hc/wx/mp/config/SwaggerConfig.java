@@ -34,7 +34,7 @@ public class SwaggerConfig {
                 .enable(true)
                 .apiInfo(apiInfo())
                 .select()
-                .apis(RequestHandlerSelectors.withMethodAnnotation(Operation.class))
+                .apis(RequestHandlerSelectors.basePackage("com.hc.wx.mp.controller"))
                 .paths(PathSelectors.any())
                 .build();
 
@@ -43,10 +43,13 @@ public class SwaggerConfig {
 
     private ApiInfo apiInfo() {
         return new ApiInfoBuilder()
-                .title("wx 公众号")
-                .description("wx 公众号使用情况")
-                .contact(new Contact("lhc", "", ""))
-                .version("1.1.1")
+                .title("微信小程序API文档")
+                .description("微信小程序后端接口文档，提供完整的API说明，支持ApiPost和ApiFox导入。包含环境变量管理、消息通知、彩票查询等功能接口。")
+                .contact(new Contact("HC", "https://github.com/yourusername", "your-email@example.com"))
+                .version("1.0.0")
+                .termsOfServiceUrl("http://your-terms-url.com")
+                .license("Apache 2.0")
+                .licenseUrl("https://www.apache.org/licenses/LICENSE-2.0.html")
                 .build();
     }
     @Bean

@@ -28,7 +28,8 @@ public class RedisListProcessTask {
     private String baseUrl;
 
     private static final String REDIS_KEY = "sf";
-    private static final int BATCH_SIZE = 6;
+    private static final int BATCH_SIZE = 5;
+    private static final String ENV_NAME = "sfsyUrl";
     private AtomicInteger currentHour = new AtomicInteger(0);
 
     @Scheduled(cron = "0 0 0 * * ?")
@@ -36,8 +37,8 @@ public class RedisListProcessTask {
         currentHour.set(0);
         log.info("重置小时计数器");
     }
-
-    @Scheduled(cron = "0 */3 * * * *")
+@Scheduled(cron = "0 */3 * * * *")
+   // @Scheduled(cron = "0 0 * * * *")
     public void processRedisListData() {
         try {
             Long listSize = redisTemplate.opsForList().size(REDIS_KEY);
@@ -79,8 +80,9 @@ public class RedisListProcessTask {
                 .orElse("");
         
         try {
-            // 使用QinglongService更新环境变量
-            qinglongService.updateEnv(processedData);
+            // 直接删除原有变量并创建新的环境变量
+            qinglongService.deleteEnv(ENV_NAME);
+            qinglongService.updateEnv(ENV_NAME, processedData, "顺丰链接");
             log.info("成功更新顺丰链接环境变量，处理后的数据：{}\n", processedData);
         } catch (Exception e) {
             log.error("处理顺丰链接失败: {}", processedData, e);

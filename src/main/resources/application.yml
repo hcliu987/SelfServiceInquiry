@@ -17,8 +17,6 @@ lottery:
   APPSECRET: HbKwaYgoIr1DhFFZ9rFoHEHhHZB1bYUT
 
 spring:
-  profiles:
-    active: dev
   redis:
     host: 118.89.200.61
     port: 6379

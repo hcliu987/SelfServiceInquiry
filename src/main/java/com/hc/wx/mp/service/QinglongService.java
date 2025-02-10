@@ -111,6 +111,61 @@ public class QinglongService {
         }
     }
 
+    public void deleteEnv(String name) {
+        try {
+            String token = getToken();
+            
+            // 查询环境变量
+            String searchUrl = baseUrl + "/open/envs?searchValue=" + name;
+            String searchResponse = HttpRequest.get(searchUrl)
+                    .header("Authorization", "Bearer " + token)
+                    .execute()
+                    .body();
+
+            JSONObject searchResult = JSONUtil.parseObj(searchResponse);
+            List<Object> existingEnvs = searchResult.getJSONArray("data").toList(Object.class);
+
+            if (!existingEnvs.isEmpty()) {
+                // 获取环境变量ID并删除
+                JSONObject existingEnv = JSONUtil.parseObj(existingEnvs.get(0));
+                int envId = existingEnv.getInt("id");
+                
+                String deleteUrl = baseUrl + "/open/envs";
+                String response = HttpRequest.delete(deleteUrl)
+                        .header("Authorization", "Bearer " + token)
+                        .body(JSONUtil.toJsonStr(Collections.singletonList(envId)))
+                        .execute()
+                        .body();
+                
+                log.info("成功删除环境变量: {}", name);
+            }
+        } catch (Exception e) {
+            log.error("删除环境变量失败: {}", name, e);
+            throw new RuntimeException("删除环境变量失败", e);
+        }
+    }
+
+    public void updateEnv(String name, String value, String remarks) {
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException("环境变量值不能为空");
+        }
+
+        try {
+            String token = getToken();
+            Map<String, Object> envData = new HashMap<>();
+            envData.put("name", name);
+            envData.put("value", value.trim());
+            envData.put("remarks", remarks);
+
+            // 创建新的环境变量
+            createEnv(envData, token);
+            log.info("成功创建环境变量{}: {}", name, value);
+        } catch (Exception e) {
+            log.error("更新环境变量{}失败: value={}", name, value, e);
+            throw new RuntimeException("更新环境变量失败", e);
+        }
+    }
+
     private void createEnv(Map<String, Object> envData, String token) {
         String createUrl = baseUrl + "/open/envs";
         String response = HttpRequest.post(createUrl)

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -74,18 +75,22 @@ public class RedisListProcessTask {
     }
 
     private void processBatch(List<String> batchData) {
+        if (batchData == null || batchData.isEmpty()) {
+            log.warn("批次数据为空，跳过处理");
+            return;
+        }
+        
         String processedData = batchData.stream()
                 .map(url -> url.replaceAll("^\"|\"$", ""))
-                .reduce((a, b) -> a + "\n" + b)
-                .orElse("");
+                .collect(Collectors.joining("\n"));
         
         try {
-            // 直接删除原有变量并创建新的环境变量
             qinglongService.deleteEnv(ENV_NAME);
             qinglongService.updateEnv(ENV_NAME, processedData, "顺丰链接");
-            log.info("成功更新顺丰链接环境变量，处理后的数据：{}\n", processedData);
+            log.info("成功更新顺丰链接环境变量，处理数据条数：{}，数据内容：{}\n", batchData.size(), processedData);
         } catch (Exception e) {
-            log.error("处理顺丰链接失败: {}", processedData, e);
+            log.error("处理顺丰链接失败，数据条数：{}，错误原因：{}", batchData.size(), e.getMessage(), e);
+            throw new RuntimeException("更新顺丰链接环境变量失败", e);
         }
     }
 }

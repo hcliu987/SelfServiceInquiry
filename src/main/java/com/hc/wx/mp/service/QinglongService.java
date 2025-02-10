@@ -76,16 +76,20 @@ public class QinglongService {
         }
     }
 
-    public void updateEnv(String name, String value, String remarks) {
+    public void updateEnv(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException("环境变量值不能为空");
+        }
+
         try {
             String token = getToken();
             Map<String, Object> envData = new HashMap<>();
-            envData.put("name", name);
-            envData.put("value", value);
-            envData.put("remarks", remarks);
+            envData.put("name", "sfsyUrl");
+            envData.put("value", value.trim());
+            envData.put("remarks", "顺丰速运链接");
 
             // 查询是否存在
-            String searchUrl = baseUrl + "/open/envs?searchValue=" + value;
+            String searchUrl = baseUrl + "/open/envs?searchValue=" + value.trim();
             String searchResponse = HttpRequest.get(searchUrl)
                     .header("Authorization", "Bearer " + token)
                     .execute()
@@ -96,12 +100,14 @@ public class QinglongService {
 
             if (existingEnvs.isEmpty()) {
                 createEnv(envData, token);
+                log.info("成功创建环境变量sfsyUrl: {}", value);
             } else {
                 updateExistingEnv(envData, existingEnvs.get(0), token);
+                log.info("成功更新环境变量sfsyUrl: {}", value);
             }
         } catch (Exception e) {
-            log.error("更新环境变量失败: name={}, value={}", name, value, e);
-            throw new RuntimeException("更新环境变量失败", e);
+            log.error("更新环境变量sfsyUrl失败: value={}", value, e);
+            throw new RuntimeException("更新环境变量sfsyUrl失败", e);
         }
     }
 

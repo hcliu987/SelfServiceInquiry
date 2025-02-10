@@ -127,4 +127,33 @@ public class QinglongService {
                 .body();
         log.info("更新环境变量成功: {}", envData.get("name"));
     }
+    public void deleteEnv(String name) {
+        try {
+            String token = getToken();
+            String searchUrl = baseUrl + "/open/envs?searchValue=" + name;
+            String searchResponse = HttpRequest.get(searchUrl)
+                    .header("Authorization", "Bearer " + token)
+                    .execute()
+                    .body();
+
+            JSONObject searchResult = JSONUtil.parseObj(searchResponse);
+            List<Object> existingEnvs = searchResult.getJSONArray("data").toList(Object.class);
+
+            if (!existingEnvs.isEmpty()) {
+                JSONObject existingEnv = JSONUtil.parseObj(existingEnvs.get(0));
+                int envId = existingEnv.getInt("id");
+                
+                String deleteUrl = baseUrl + "/open/envs";
+                String response = HttpRequest.delete(deleteUrl)
+                        .header("Authorization", "Bearer " + token)
+                        .body(JSONUtil.toJsonStr(Collections.singletonList(envId)))
+                        .execute()
+                        .body();
+                log.info("删除环境变量成功: {}", name);
+            }
+        } catch (Exception e) {
+            log.error("删除环境变量失败: name={}", name, e);
+            throw new RuntimeException("删除环境变量失败", e);
+        }
+    }
 }

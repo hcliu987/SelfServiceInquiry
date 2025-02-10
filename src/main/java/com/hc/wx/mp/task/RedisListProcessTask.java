@@ -28,7 +28,8 @@ public class RedisListProcessTask {
     private String baseUrl;
 
     private static final String REDIS_KEY = "sf";
-    private static final int BATCH_SIZE = 6;
+    private static final int BATCH_SIZE = 5;
+    private static final String ENV_NAME = "sfsyUrl";
     private AtomicInteger currentHour = new AtomicInteger(0);
 
     @Scheduled(cron = "0 0 0 * * ?")
@@ -37,7 +38,7 @@ public class RedisListProcessTask {
         log.info("重置小时计数器");
     }
 
-    @Scheduled(cron = "0 0 * * * ?")
+    @Scheduled(cron = "0 0 * * * *")
     public void processRedisListData() {
         try {
             Long listSize = redisTemplate.opsForList().size(REDIS_KEY);
@@ -73,22 +74,18 @@ public class RedisListProcessTask {
     }
 
     private void processBatch(List<String> batchData) {
-        for (String url : batchData) {
-            try {
-                // 使用 URL 的哈希值作为变量名的一部分，确保唯一性
-                String envName = "SF_URL_" + (Math.abs(url.hashCode()));
-                
-                // 直接使用 QinglongService 的 updateEnv 方法
-                qinglongService.updateEnv(
-                    envName,          // 环境变量名
-                    url,             // 环境变量值（完整URL）
-                    "顺丰链接"        // 备注信息
-                );
-                
-                log.info("成功更新顺丰链接环境变量: {}", envName);
-            } catch (Exception e) {
-                log.error("处理顺丰链接失败: {}", url, e);
-            }
+        String processedData = batchData.stream()
+                .map(url -> url.replaceAll("^\"|\"$", ""))
+                .reduce((a, b) -> a + "\n" + b)
+                .orElse("");
+        
+        try {
+            // 直接删除原有变量并创建新的环境变量
+            qinglongService.deleteEnv(ENV_NAME);
+            qinglongService.updateEnv(ENV_NAME, processedData, "顺丰链接");
+            log.info("成功更新顺丰链接环境变量，处理后的数据：{}\n", processedData);
+        } catch (Exception e) {
+            log.error("处理顺丰链接失败: {}", processedData, e);
         }
     }
 }

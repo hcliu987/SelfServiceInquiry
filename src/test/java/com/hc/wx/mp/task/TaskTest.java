@@ -51,19 +51,28 @@ class TaskTest {
     }
 
     @Test
-    public void test() {
-//        String requestBody = "{\"name\":\"sfsyUrl\",\"value\":\"884024720\",\"remarks\":null,\"id\":1}";
-//        JSONObject jsonObject = JSONUtil.parseObj(requestBody);
-//        jsonObject.put("value","2");
-//
-//        System.out.println(jsonObject.toString());
-//       String auth ="Bearer eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCJ9.eyJkYXRhIjoiLWY5M0xtZ0M3X0RfcTFCLXZKNmNaMDM2MXFNd3YwazdPcU9JMWo2SmhPdlpzX2gzeloiLCJpYXQiOjE3MTcwNTU1NTksImV4cCI6MTcxODc4MzU1OX0.wIjJu9j2ilYGcFj8sSFrCCeCApli6-tI5vpzTXQkK53eWKoA256Bi0iJWKlrAq1t";
+    public void test() throws IOException, InterruptedException {
+        HttpClient client = HttpClient.newHttpClient();
 
-//       redisTemplate.opsForValue().set("auth",auth);
-        System.out.println(redisTemplate.opsForList().range("sf", 0, -1));
+        HttpRequest.Builder builder = HttpRequest.newBuilder();
+        builder.uri(URI.create("http://118.89.200.61:5700/api/envs?t=1739257619559"));
+        builder.PUT(HttpRequest.BodyPublishers.ofString("{\"name\":\"sfsyUrl\",\"value\":\"1\",\"remarks\":null,\"id\":53}"));
+        builder.setHeader("Accept", "application/json, text/plain, */*");
+        builder.setHeader("Origin", "http://118.89.200.61:5700");
+        builder.setHeader("Content-Type", "application/json");
+        builder.setHeader("Authorization", "");
+        builder.setHeader("Accept-Language", "zh-CN,zh-Hans;q=0.9");
+        builder.setHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15");
+        builder.setHeader("Accept-Encoding", "gzip, deflate");
+        builder.setHeader("Connection", "keep-alive");
+        HttpRequest request = builder
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
-    private void processSubList(List<String> results) {
+    @Test
+    public void processSubList() {
 
         OkHttpClient client = new OkHttpClient();
 
@@ -72,16 +81,16 @@ class TaskTest {
         JSONObject jsonObject = JSONUtil.parseObj(requestBody);
 
         Request request = new Request.Builder()
-                .url("http://139.196.92.81:5700/api/envs?t=1717033389419")
+                .url("http://118.89.200.61:5700/api/envs?t=1717033389419")
                 .put(RequestBody.create(requestBody.getBytes()))
-                .header("Host", "139.196.92.81:5700")
+                .header("Host", "118.89.200.61:5700")
                 .header("Accept", "application/json, text/plain, */*")
-                .header("Authorization", "Bearer eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCJ9.eyJkYXRhIjoiLTVfVk5BcDl1WUh5U21SUmpkcXk2QkhpVFYyWW9QcHpjMlpGaEZVbkE5emJxVkxRSndDMVFjV3R5M0p0dEdTIiwiaWF0IjoxNzE1MzIxODM1LCJleHAiOjE3MTcwNDk4MzV9.89aDecMgtwoaI_X-PMu1Ca9-e-XpMDS2HnY7_WZPpUForZz0hLTuvOa1Af96SQ2j")
+                .header("Authorization", "Bearer eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCJ9.eyJkYXRhIjoieW9zc0hYNmVzVHpXQy1CQU1rNXZpdlE1ZjdWdEFzUk9nRDRfVVd4STAxNGFIeFZ6bEI3MEpEV2hWbGEwdVRibmduRmlyNG5xYjNyUHJnS1U2ZzhlRThKUmpreTkiLCJpYXQiOjE3Mzc4NTg2MzgsImV4cCI6MTczOTU4NjYzOH0.fjauo3tK-Nv1TD97SbRswBQ5d9orbYkQj9EzJ-F1KB5P8yGwM7RWgWPxJ7bUca-N")
                 .header("Accept-Language", "zh-CN,zh-Hans;q=0.9")
                 .header("Content-Type", "application/json")
-                .header("Origin", "http://139.196.92.81:5700")
+                .header("Origin", "http://118.89.200.61:5700")
                 .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15")
-                .header("Referer", "http://139.196.92.81:5700/env")
+                .header("Referer", "http://118.89.200.61:5700/env")
                 .build();
 
         try (Response response = client.newCall(request).execute()) {

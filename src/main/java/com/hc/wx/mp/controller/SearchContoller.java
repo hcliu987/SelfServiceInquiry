@@ -22,9 +22,9 @@ public class SearchContoller {
 
     @RequestMapping("/res/show")
     public String show(@RequestParam(name="r") String r, Model model) throws Exception {
-        List<JsonsRootBean> result = searchService.result(r);
+//        List<JsonsRootBean> result = searchService.result(r);
         //封装要显示到视图中的数据
-        model.addAttribute("list", result);
+//        model.addAttribute("list", result);
         return "show";
 
     }

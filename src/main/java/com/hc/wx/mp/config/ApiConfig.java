@@ -8,9 +8,20 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @ConfigurationProperties(prefix = "api.search")
 public class ApiConfig {
-    private String baseUrl = "http://m.kkqws.com";
-    private String juziPath = "/v/api/getJuzi";
-    private String xiaoyuPath = "/v/api/getXiaoyu";
-    private String searchPath = "/v/api/search";
-    private String token = "i69";
+    private String baseUrl;
+    private String juziPath;
+    private String xiaoyuPath;
+    private String searchPath;
+    private String token;
+    private String searchXpath;
+    
+    private ThreadPoolConfig threadPool = new ThreadPoolConfig();
+    
+    @Data
+    public static class ThreadPoolConfig {
+        private int coreSize = 8;
+        private int maxSize = 16;
+        private int queueCapacity = 50;
+        private long keepAliveSeconds = 30;
+    }
 }

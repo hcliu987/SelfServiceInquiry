@@ -9,16 +9,13 @@ server:
   port: 80
 
 
-notice:
-  brakId: VVtPqTFKkTfBFLorEvLDX3
-
 lottery:
   APPID: vinnsglluwk0brol
   APPSECRET: HbKwaYgoIr1DhFFZ9rFoHEHhHZB1bYUT
 
 spring:
-  profiles:
-    active: dev
+#  profiles:
+#    active: dev
   redis:
     host: 118.89.200.61
     port: 6379
@@ -32,6 +29,7 @@ api:
     juzi-path: /v/api/getJuzi
     xiaoyu-path: /v/api/getXiaoyu
     search-path: /v/api/search
+    searchx-path: /v/api/getSearchX
     token: i69
 notification:
   bark:

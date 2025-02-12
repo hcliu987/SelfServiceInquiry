@@ -16,7 +16,7 @@ public class SearchTest {
 
     @Test
     public void test() throws Exception {
-        String msg = service.resultMsg("与凤行");
+        String msg = service.searchParallel("三叉戟");
         System.out.println("当前结果："+msg);
     }
 }

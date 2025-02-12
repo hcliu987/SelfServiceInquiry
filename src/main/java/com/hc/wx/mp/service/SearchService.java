@@ -6,6 +6,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.hc.wx.mp.config.ApiConfig;
 import com.hc.wx.mp.entity.JsonsRootBean;
+import com.hc.wx.mp.entity.Lists;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -20,135 +21,174 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 
+
 @Service
 @Slf4j
 public class SearchService {
     private final ApiConfig apiConfig;
+    private final ExecutorService executorService;
+    private static final int TIMEOUT_SECONDS = 1;
 
     public SearchService(ApiConfig apiConfig) {
         this.apiConfig = apiConfig;
+        this.executorService = new ThreadPoolExecutor(
+            apiConfig.getThreadPool().getCoreSize(),
+            apiConfig.getThreadPool().getMaxSize(),
+            apiConfig.getThreadPool().getKeepAliveSeconds(),
+            TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(apiConfig.getThreadPool().getQueueCapacity()),
+            new ThreadPoolExecutor.CallerRunsPolicy()
+        );
+        ((ThreadPoolExecutor) executorService).prestartAllCoreThreads();
+    }
+
+    private String sendHttpRequest(String path, String text) throws Exception {
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start("sendHttpRequest");
+        log.info("开始执行HTTP请求，path: {}, text: {}", path, text);
+        try {
+            URL url = new URL(apiConfig.getBaseUrl() + path);
+            HttpURLConnection httpConn = (HttpURLConnection) url.openConnection();
+            httpConn.setRequestMethod("POST");
+            httpConn.setConnectTimeout(500);
+            httpConn.setReadTimeout(500);
+
+            setCommonHeaders(httpConn);
+            sendRequestBody(httpConn, text);
+
+            String result = handleResponse(httpConn);
+            log.info("HTTP请求执行成功，结果: {}", result);
+            return result;
+        } catch (Exception e) {
+            log.error("HTTP请求执行失败，path: {}, text: {}, 异常: {}", path, text, e.getMessage());
+            throw e;
+        } finally {
+            stopWatch.stop();
+            log.info("HTTP请求执行完成，耗时：{}ms", stopWatch.getTotalTimeMillis());
+        }
+    }
+
+    private void setCommonHeaders(HttpURLConnection httpConn) {
+        httpConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+        httpConn.setRequestProperty("Accept", "*/*");
+        httpConn.setRequestProperty("Accept-Language", "zh-CN,zh-Hans;q=0.9");
+        httpConn.setRequestProperty("Accept-Encoding", "gzip, deflate");
+        httpConn.setRequestProperty("Host", "m.kkqws.com");
+        httpConn.setRequestProperty("Origin", "http://m.kkqws.com");
+        httpConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15");
+        httpConn.setRequestProperty("Connection", "keep-alive");
+        httpConn.setRequestProperty("Referer", "http://m.kkqws.com/app/index.html?name=%E6%B1%9F%E6%B2%B3%E6%97%A5%E4%B8%8A&token=i69");
+        httpConn.setRequestProperty("Content-Length", "51");
+        httpConn.setRequestProperty("Cookie", "Hm_lpvt_83af2d74162d7cbbebdab5495e78e543=1710471278; Hm_lvt_83af2d74162d7cbbebdab5495e78e543=1710466479");
+        httpConn.setRequestProperty("Proxy-Connection", "keep-alive");
+        httpConn.setRequestProperty("X-Requested-With", "XMLHttpRequest");
+    }
+
+    private void sendRequestBody(HttpURLConnection httpConn, String text) throws IOException {
+        httpConn.setDoOutput(true);
+        try (OutputStreamWriter writer = new OutputStreamWriter(httpConn.getOutputStream())) {
+            writer.write("name=%" + text + "&token=" + apiConfig.getToken());
+            writer.flush();
+        }
+    }
+
+    private String handleResponse(HttpURLConnection httpConn) throws IOException {
+        try (InputStream responseStream = httpConn.getResponseCode() / 100 == 2
+                ? httpConn.getInputStream()
+                : httpConn.getErrorStream()) {
+            
+            InputStream stream = responseStream;
+            if ("gzip".equals(httpConn.getContentEncoding())) {
+                stream = new GZIPInputStream(responseStream);
+            }
+            
+            try (Scanner s = new Scanner(stream).useDelimiter("\\A")) {
+                return s.hasNext() ? s.next() : "";
+            }
+        }
     }
 
     public String getJuzi(String text) throws Exception {
-        URL url = new URL(apiConfig.getBaseUrl() + apiConfig.getJuziPath());
-        HttpURLConnection httpConn = (HttpURLConnection) url.openConnection();
-        httpConn.setRequestMethod("POST");
-
-        httpConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-        httpConn.setRequestProperty("Accept", "*/*");
-        httpConn.setRequestProperty("Accept-Language", "zh-CN,zh-Hans;q=0.9");
-        httpConn.setRequestProperty("Accept-Encoding", "gzip, deflate");
-        httpConn.setRequestProperty("Host", "m.kkqws.com");
-        httpConn.setRequestProperty("Origin", "http://m.kkqws.com");
-        httpConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15");
-        httpConn.setRequestProperty("Connection", "keep-alive");
-        httpConn.setRequestProperty("Referer", "http://m.kkqws.com/app/index.html?name=%E6%B1%9F%E6%B2%B3%E6%97%A5%E4%B8%8A&token=i69");
-        httpConn.setRequestProperty("Content-Length", "51");
-        httpConn.setRequestProperty("Cookie", "Hm_lpvt_83af2d74162d7cbbebdab5495e78e543=1710471278; Hm_lvt_83af2d74162d7cbbebdab5495e78e543=1710466479");
-        httpConn.setRequestProperty("Proxy-Connection", "keep-alive");
-        httpConn.setRequestProperty("X-Requested-With", "XMLHttpRequest");
-
-        httpConn.setDoOutput(true);
-        OutputStreamWriter writer = new OutputStreamWriter(httpConn.getOutputStream());
-        writer.write("name=%" + text + "&token=i69");
-        writer.flush();
-        writer.close();
-        httpConn.getOutputStream().close();
-
-        InputStream responseStream = httpConn.getResponseCode() / 100 == 2
-                ? httpConn.getInputStream()
-                : httpConn.getErrorStream();
-        if ("gzip".equals(httpConn.getContentEncoding())) {
-            responseStream = new GZIPInputStream(responseStream);
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start("getJuzi");
+        log.info("开始执行getJuzi方法，参数text: {}", text);
+        try {
+            String result = sendHttpRequest(apiConfig.getJuziPath(), text);
+            log.info("getJuzi方法执行成功，结果: {}", result);
+            return result;
+        } finally {
+            stopWatch.stop();
+            log.info("getJuzi方法执行完成，耗时：{}ms", stopWatch.getTotalTimeMillis());
         }
-        Scanner s = new Scanner(responseStream).useDelimiter("\\A");
-        String response = s.hasNext() ? s.next() : "";
-        return response;
-
     }
 
     public String getXiaoyu(String text) throws Exception {
-        URL url = new URL(apiConfig.getBaseUrl() + apiConfig.getXiaoyuPath());
-        HttpURLConnection httpConn = (HttpURLConnection) url.openConnection();
-        httpConn.setRequestMethod("POST");
-
-        httpConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-        httpConn.setRequestProperty("Accept", "*/*");
-        httpConn.setRequestProperty("Accept-Language", "zh-CN,zh-Hans;q=0.9");
-        httpConn.setRequestProperty("Accept-Encoding", "gzip, deflate");
-        httpConn.setRequestProperty("Host", "m.kkqws.com");
-        httpConn.setRequestProperty("Origin", "http://m.kkqws.com");
-        httpConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15");
-        httpConn.setRequestProperty("Connection", "keep-alive");
-        httpConn.setRequestProperty("Referer", "http://m.kkqws.com/app/index.html?name=%E6%B1%9F%E6%B2%B3%E6%97%A5%E4%B8%8A&token=i69");
-        httpConn.setRequestProperty("Content-Length", "51");
-        httpConn.setRequestProperty("Cookie", "Hm_lpvt_83af2d74162d7cbbebdab5495e78e543=1710471278; Hm_lvt_83af2d74162d7cbbebdab5495e78e543=1710466479");
-        httpConn.setRequestProperty("Proxy-Connection", "keep-alive");
-        httpConn.setRequestProperty("X-Requested-With", "XMLHttpRequest");
-
-        httpConn.setDoOutput(true);
-        OutputStreamWriter writer = new OutputStreamWriter(httpConn.getOutputStream());
-        writer.write("name=%" + text + "&token=i69");
-        writer.flush();
-        writer.close();
-        httpConn.getOutputStream().close();
-
-        InputStream responseStream = httpConn.getResponseCode() / 100 == 2
-                ? httpConn.getInputStream()
-                : httpConn.getErrorStream();
-        if ("gzip".equals(httpConn.getContentEncoding())) {
-            responseStream = new GZIPInputStream(responseStream);
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start("getXiaoyu");
+        log.info("开始执行getXiaoyu方法，参数text: {}", text);
+        try {
+            String result = sendHttpRequest(apiConfig.getXiaoyuPath(), text);
+            log.info("getXiaoyu方法执行成功，结果: {}", result);
+            return result;
+        } finally {
+            stopWatch.stop();
+            log.info("getXiaoyu方法执行完成，耗时：{}ms", stopWatch.getTotalTimeMillis());
         }
-        Scanner s = new Scanner(responseStream).useDelimiter("\\A");
-        String response = s.hasNext() ? s.next() : "";
-        return response;
     }
 
     public String search(String text) throws Exception {
-        URL url = new URL(apiConfig.getBaseUrl() + apiConfig.getSearchPath());
-        HttpURLConnection httpConn = (HttpURLConnection) url.openConnection();
-        httpConn.setRequestMethod("POST");
-
-        httpConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-        httpConn.setRequestProperty("Accept", "*/*");
-        httpConn.setRequestProperty("Accept-Language", "zh-CN,zh-Hans;q=0.9");
-        httpConn.setRequestProperty("Accept-Encoding", "gzip, deflate");
-        httpConn.setRequestProperty("Host", "m.kkqws.com");
-        httpConn.setRequestProperty("Origin", "http://m.kkqws.com");
-        httpConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15");
-        httpConn.setRequestProperty("Connection", "keep-alive");
-        httpConn.setRequestProperty("Referer", "http://m.kkqws.com/app/index.html?name=%E6%B1%9F%E6%B2%B3%E6%97%A5%E4%B8%8A&token=i69");
-        httpConn.setRequestProperty("Content-Length", "51");
-        httpConn.setRequestProperty("Cookie", "Hm_lpvt_83af2d74162d7cbbebdab5495e78e543=1710471278; Hm_lvt_83af2d74162d7cbbebdab5495e78e543=1710466479");
-        httpConn.setRequestProperty("Proxy-Connection", "keep-alive");
-        httpConn.setRequestProperty("X-Requested-With", "XMLHttpRequest");
-
-        httpConn.setDoOutput(true);
-        OutputStreamWriter writer = new OutputStreamWriter(httpConn.getOutputStream());
-        writer.write("name=%" + text + "&token=i69");
-        writer.flush();
-        writer.close();
-        httpConn.getOutputStream().close();
-
-        InputStream responseStream = httpConn.getResponseCode() / 100 == 2
-                ? httpConn.getInputStream()
-                : httpConn.getErrorStream();
-        if ("gzip".equals(httpConn.getContentEncoding())) {
-            responseStream = new GZIPInputStream(responseStream);
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start("search");
+        log.info("开始执行search方法，参数text: {}", text);
+        try {
+            String result = sendHttpRequest(apiConfig.getSearchPath(), text);
+            log.info("search方法执行成功，结果: {}", result);
+            return result;
+        } finally {
+            stopWatch.stop();
+            log.info("search方法执行完成，耗时：{}ms", stopWatch.getTotalTimeMillis());
         }
-        Scanner s = new Scanner(responseStream).useDelimiter("\\A");
-        String response = s.hasNext() ? s.next() : "";
-        return response;
     }
 
-    public List<JsonsRootBean> result(String text) throws Exception {
-        String encode = URLEncoder.encode(text, "UTF-8");
-        ArrayList<JsonsRootBean> objects = new ArrayList<>();
-        System.out.println();
-        objects.add(analysisJson(search(text)));
-        objects.add(analysisJson(getJuzi(text)));
-        objects.add(analysisJson(getXiaoyu(text)));
-        return objects;
+    public String searchX(String text) throws Exception {
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start("searchX");
+        log.info("开始执行searchX方法，参数text: {}", text);
+        try {
+            String result = sendHttpRequest(apiConfig.getSearchXpath(), text);
+            log.info("searchX方法执行成功，结果: {}", result);
+            return result;
+        } finally {
+            stopWatch.stop();
+            log.info("searchX方法执行完成，耗时：{}ms", stopWatch.getTotalTimeMillis());
+        }
+    }
+
+
+    public String optimizeJsonFormat(List<String> jsonResponses) {
+        List<Map<String, Object>> resultList = new ArrayList<>();
+        StringBuffer sb=new StringBuffer();
+        for (String jsonResponse : jsonResponses) {
+            if (StrUtil.hasEmpty(jsonResponse) || !JSONUtil.isTypeJSON(jsonResponse)) {
+                continue;
+            }
+
+            JsonsRootBean rootBean = JSONUtil.toBean(jsonResponse, JsonsRootBean.class);
+            if (rootBean == null || rootBean.getList() == null) {
+                continue;
+            }
+
+
+            for (Lists item : rootBean.getList()) {
+                String question = item.getQuestion();
+                String answer = item.getAnswer();
+                sb.append(question).append(answer);
+            }
+
+        }
+
+
+        return  JSONUtil.toJsonStr(sb.toString());
     }
 
     public JsonsRootBean analysisJson(String json) {
@@ -164,173 +204,131 @@ public class SearchService {
         return jsonsRootBean;
     }
 
-    public String resultMsg(String text) throws Exception {
-        StringBuilder sb = new StringBuilder();
-        long startTime = System.currentTimeMillis();
-        StopWatch stopWatch = new StopWatch();
-        stopWatch.start();
-        ExecutorService executorService = Executors.newFixedThreadPool(4);
-
-        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
-            try {
-                if (search(text).length() > 40) {
-                    if (analysisJson(search(text)).getList() != null) {
-                        if (analysisJson(search(text)).getList().size() > 0) {
-
-                            sb.append(analysisJson(search(text)).getList().get(0).getAnswer());
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-            return sb.toString();
-        }, executorService);
-
-
-        CompletableFuture<String> stringCompletableFuture1 = CompletableFuture.supplyAsync(() -> {
-
-            try {
-                if (getJuzi(text).length() > 40) {
-                    if (getJuzi(text) != null) {
-                        if (analysisJson(getJuzi(text)).getList().size() > 0) {
-                            sb.append(analysisJson(getJuzi(text)).getList().get(0).getAnswer());
-                        }
-
-                    }
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-            return sb.toString();
-        }, executorService);
-
-        CompletableFuture<String> stringCompletableFuture2 = CompletableFuture.supplyAsync(() -> {
-            try {
-                if (getJuzi(text).length() > 40) {
-                    if (getXiaoyu(text) != null) {
-                        if (analysisJson(getXiaoyu(text)).getList().size() > 0) {
-                            sb.append(analysisJson(getXiaoyu(text)).getList().get(0).getAnswer());
-                        }
-
-                    }
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-            return sb.toString();
-        }, executorService);
-
-        CompletableFuture<Object> allOf = CompletableFuture.anyOf(future,  stringCompletableFuture1, stringCompletableFuture2);
-        System.out.println(allOf.get());
-
-
-        long endTime = System.currentTimeMillis();
-        stopWatch.stop();
-        System.out.printf("当前方法查询时间: %d 秒. %n", (endTime - startTime) / 1000);
-        System.out.printf("当前方法执行时长: %s 秒. %n", stopWatch.getTotalTimeSeconds() + "");
-        log.info("当前方法查询时间: %d 秒", (endTime - startTime) / 1000);
-        return (String) allOf.get();
-    }
-
-    private static final ExecutorService executorService = Executors.newFixedThreadPool(5);
-
     public String searchParallel(String text) {
-        StopWatch stopWatch = new StopWatch();
-        stopWatch.start();
+        List<CompletableFuture<String>> futures = new ArrayList<>();
 
-        List<CompletableFuture<String>> futures = Arrays.asList(
-                createSearchFuture(text, this::search),
-                createSearchFuture(text, this::getJuzi),
-                createSearchFuture(text, this::getXiaoyu)
-        );
+        // 并发调用四个搜索方法
+        futures.add(createSearchFuture(() -> getJuzi(text), "获取句子"));
+        futures.add(createSearchFuture(() -> getXiaoyu(text), "获取小语"));
+        futures.add(createSearchFuture(() -> search(text), "搜索"));
+        futures.add(createSearchFuture(() -> searchX(text), "搜索X"));
 
-        try {
-            CompletableFuture<String> result = CompletableFuture.anyOf(futures.toArray(new CompletableFuture[0]))
-                    .thenApply(response -> processResponse((String) response));
+        // 等待所有任务完成并收集结果，添加超时控制
+        List<String> responses = futures.stream()
+                .map(future -> {
+                    try {
+                        return future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    } catch (TimeoutException e) {
+                        log.warn("搜索请求超过{}秒超时", TIMEOUT_SECONDS);
+                        return "";
+                    } catch (Exception e) {
+                        log.error("搜索请求异常", e);
+                        return "";
+                    }
+                })
+                .filter(result -> !result.isEmpty())
+                .distinct()
+                .collect(Collectors.toList());
 
-            String answer = result.get(5, TimeUnit.SECONDS);
-
-            stopWatch.stop();
-            log.info("查询耗时: {} 秒", stopWatch.getTotalTimeSeconds());
-
-            return answer;
-        } catch (Exception e) {
-            log.error("查询失败", e);
-            return "查询超时或失败";
-        }
+        // 优化JSON格式
+        return optimizeJsonFormat(responses);
     }
 
-    private CompletableFuture<String> createSearchFuture(String text, SearchFunction searchFunction) {
+    private CompletableFuture<String> createSearchFuture(SearchSupplier supplier, String operationName) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                return searchFunction.apply(text);
+                return supplier.get();
             } catch (Exception e) {
-                log.error("查询接口异常", e);
+                log.error(operationName + "异常", e);
                 return "";
             }
         }, executorService);
     }
 
-    private String processResponse(String response) {
-        if (StrUtil.isBlank(response) || response.length() <= 40) {
-            return "";
-        }
-
-        JsonsRootBean result = analysisJson(response);
-        if (result != null && result.getList() != null && !result.getList().isEmpty()) {
-            return result.getList().get(0).getAnswer();
-        }
-        return "";
-    }
-
     @FunctionalInterface
-    private interface SearchFunction {
-        String apply(String text) throws Exception;
+    private interface SearchSupplier {
+        String get() throws Exception;
     }
 
     public String searchAndMerge(String text) {
         StopWatch stopWatch = new StopWatch();
         stopWatch.start();
 
-        List<CompletableFuture<String>> futures = Arrays.asList(
-                createSearchFuture(text, this::search),
-                createSearchFuture(text, this::getJuzi),
-                createSearchFuture(text, this::getXiaoyu)
-        );
+        String result = searchParallel(text);
 
-        try {
-            CompletableFuture<List<String>> allResults = CompletableFuture.allOf(
-                            futures.toArray(new CompletableFuture[0]))
-                    .thenApply(v -> futures.stream()
-                            .map(CompletableFuture::join)
-                            .map(this::processResponse)
-                            .filter(StrUtil::isNotBlank)
-                            .collect(Collectors.toList()));
+        stopWatch.stop();
+        log.info("并发搜索耗时：{}ms", stopWatch.getTotalTimeMillis());
 
-            List<String> results = allResults.get(5, TimeUnit.SECONDS);
-
-            String mergedResult = mergeResults(results);
-
-            stopWatch.stop();
-            log.info("合并查询耗时: {} 秒", stopWatch.getTotalTimeSeconds());
-
-            return StrUtil.isNotBlank(mergedResult) ? mergedResult : "未找到相关内容";
-        } catch (Exception e) {
-            log.error("合并查询失败", e);
-            return "查询超时或失败";
-        }
+        return result;
     }
 
-    private String mergeResults(List<String> results) {
-        if (results.isEmpty()) {
-            return "";
+    public String searchBest(String text) {
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start("searchBest");
+        log.info("开始执行searchBest方法，参数text: {}", text);
+
+        List<CompletableFuture<String>> futures = new ArrayList<>();
+
+        // 并发调用四个搜索方法，使用更短的超时时间
+        futures.add(createSearchFuture(() -> getJuzi(text), "获取句子"));
+        futures.add(createSearchFuture(() -> getXiaoyu(text), "获取小语"));
+        futures.add(createSearchFuture(() -> search(text), "搜索"));
+        futures.add(createSearchFuture(() -> searchX(text), "搜索X"));
+
+        // 使用CompletableFuture.anyOf快速返回第一个有效结果
+        CompletableFuture<Object> anyResult = CompletableFuture.anyOf(
+            futures.toArray(new CompletableFuture[0])
+        );
+
+        String bestResult = "";
+        try {
+            // 等待第一个有效结果，设置更短的超时时间
+            Object result = anyResult.get(800, TimeUnit.MILLISECONDS);
+            if (result instanceof String && !((String) result).isEmpty() && JSONUtil.isTypeJSON((String) result)) {
+                JsonsRootBean rootBean = JSONUtil.toBean((String) result, JsonsRootBean.class);
+                if (rootBean != null && rootBean.getList() != null && !rootBean.getList().isEmpty()) {
+                    Lists item = rootBean.getList().get(0);
+                    bestResult = item.getQuestion() + item.getAnswer();
+                }
+            }
+
+            // 如果第一个结果无效，尝试获取其他结果
+            if (bestResult.isEmpty()) {
+                bestResult = futures.stream()
+                    .map(future -> {
+                        try {
+                            return future.get(200, TimeUnit.MILLISECONDS);
+                        } catch (Exception e) {
+                            return "";
+                        }
+                    })
+                    .filter(r -> !r.isEmpty() && JSONUtil.isTypeJSON(r))
+                    .map(r -> {
+                        try {
+                            JsonsRootBean rootBean = JSONUtil.toBean(r, JsonsRootBean.class);
+                            if (rootBean != null && rootBean.getList() != null && !rootBean.getList().isEmpty()) {
+                                Lists item = rootBean.getList().get(0);
+                                return item.getQuestion() + item.getAnswer();
+                            }
+                        } catch (Exception e) {
+                            log.warn("解析JSON结果异常", e);
+                        }
+                        return "";
+                    })
+                    .filter(r -> !r.isEmpty())
+                    .findFirst()
+                    .orElse("");
+            }
+        } catch (TimeoutException e) {
+            log.warn("搜索请求超时");
+        } catch (Exception e) {
+            log.error("搜索请求异常", e);
         }
 
-        // 找出最长的有效结果
-        return results.stream()
-                .filter(StrUtil::isNotBlank)
-                .max(Comparator.comparingInt(String::length))
-                .orElse("");
+        stopWatch.stop();
+        log.info("searchBest方法执行完成，耗时：{}ms，最佳结果长度：{}", 
+                stopWatch.getTotalTimeMillis(), bestResult.length());
+
+        return bestResult;
     }
 }

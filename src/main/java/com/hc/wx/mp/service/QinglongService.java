@@ -1,17 +1,15 @@
 package com.hc.wx.mp.service;
 
 import cn.hutool.http.HttpRequest;
-import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpResponse;
 
 @Slf4j
 @Service
@@ -63,6 +61,7 @@ public class QinglongService {
                     .body();
 
             TokenResponse tokenResponse = JSONUtil.toBean(response, TokenResponse.class);
+
             if (tokenResponse.getCode() == 200 && tokenResponse.getData() != null) {
                 token = tokenResponse.getData().getToken();
                 tokenExpiration = tokenResponse.getData().getExpiration();
@@ -77,83 +76,46 @@ public class QinglongService {
         }
     }
 
+    @Data
+    static class EnvUpdateResponse {
+        private int code;
+        private String msg;
+        private Object data;
+    }
+
+    /**
+     * 更新环境变量
+     */
     public void updateEnv(String name, String value, String remarks) {
         try {
             String token = getToken();
-            Map<String, Object> envData = new HashMap<>();
-            envData.put("name", name);
-            envData.put("value", value);
-            envData.put("remarks", remarks);
+            // 修改 requestBody 格式，添加 id 字段
+            String requestBody = String.format("{\"name\":\"%s\",\"value\":\"%s\",\"remarks\":%s,\"id\":53}",
+                    name,
+                    value,
+                    remarks != null ? "\"" + remarks + "\"" : "null"
+            );
 
-            String searchUrl = baseUrl + "/open/envs?searchValue=" + value;
-            String searchResponse = HttpRequest.get(searchUrl)
+            String url = baseUrl + "/open/envs?t=" + System.currentTimeMillis();
+            String response = HttpRequest.put(url)
+                    .header("Accept", "application/json, text/plain, */*")
                     .header("Authorization", "Bearer " + token)
+                    .header("Content-Type", "application/json")
+                    .body(requestBody)
                     .execute()
                     .body();
 
-            JSONObject searchResult = JSONUtil.parseObj(searchResponse);
-            List<Object> existingEnvs = searchResult.getJSONArray("data").toList(Object.class);
-
-            if (existingEnvs.isEmpty()) {
-                createEnv(envData, token);
-            } else {
-                updateExistingEnv(envData, existingEnvs.get(0), token);
+            System.out.println("更新环境变量响应:"+response);
+            EnvUpdateResponse result = JSONUtil.toBean(response, EnvUpdateResponse.class);
+            if (result.getCode() != 200) {
+                log.error("更新环境变量失败: {}", result.getMsg());
+                throw new RuntimeException("更新环境变量失败: " + result.getMsg());
             }
+            log.info("更新环境变量成功: name={}", name);
         } catch (Exception e) {
-            log.error("更新环境变量失败：name={}，错误原因：{}", name, e.getMessage());
-            throw new RuntimeException("更新环境变量失败：" + e.getMessage(), e);
+            log.error("更新环境变量异常: name={}", name, e);
+            throw new RuntimeException("更新环境变量失败", e);
         }
     }
 
-    private void createEnv(Map<String, Object> envData, String token) {
-        String createUrl = baseUrl + "/open/envs";
-        String response = HttpRequest.post(createUrl)
-                .header("Authorization", "Bearer " + token)
-                .body(JSONUtil.toJsonStr(Collections.singletonList(envData)))
-                .execute()
-                .body();
-        log.info("创建环境变量成功: {}", envData.get("name"));
-    }
-
-    private void updateExistingEnv(Map<String, Object> envData, Object existing, String token) {
-        JSONObject existingEnv = JSONUtil.parseObj(existing);
-        envData.put("id", existingEnv.getInt("id"));
-        
-        String updateUrl = baseUrl + "/open/envs";
-        String response = HttpRequest.put(updateUrl)
-                .header("Authorization", "Bearer " + token)
-                .body(JSONUtil.toJsonStr(envData))
-                .execute()
-                .body();
-        log.info("更新环境变量成功: {}", envData.get("name"));
-    }
-    public void deleteEnv(String name) {
-        try {
-            String token = getToken();
-            String searchUrl = baseUrl + "/open/envs?searchValue=" + name;
-            String searchResponse = HttpRequest.get(searchUrl)
-                    .header("Authorization", "Bearer " + token)
-                    .execute()
-                    .body();
-
-            JSONObject searchResult = JSONUtil.parseObj(searchResponse);
-            List<Object> existingEnvs = searchResult.getJSONArray("data").toList(Object.class);
-
-            if (!existingEnvs.isEmpty()) {
-                JSONObject existingEnv = JSONUtil.parseObj(existingEnvs.get(0));
-                int envId = existingEnv.getInt("id");
-                
-                String deleteUrl = baseUrl + "/open/envs";
-                String response = HttpRequest.delete(deleteUrl)
-                        .header("Authorization", "Bearer " + token)
-                        .body(JSONUtil.toJsonStr(Collections.singletonList(envId)))
-                        .execute()
-                        .body();
-                log.info("删除环境变量成功: {}", name);
-            }
-        } catch (Exception e) {
-            log.error("删除环境变量失败: name={}", name, e);
-            throw new RuntimeException("删除环境变量失败", e);
-        }
-    }
 }

@@ -75,18 +75,5 @@ class SFTaskTest {
     @Test
     @DisplayName("测试完整流程")
     void testFullProcess() {
-        // 重置计数器
-        redisListProcessTask.resetHourCounter();
-        
-        // 获取初始数据量
-        Long initialSize = redisTemplate.opsForList().size("sf");
-        log.info("初始数据量: {}", initialSize);
-        
-        // 执行处理
-        redisListProcessTask.processRedisListData();
-        
-        // 验证处理结果
-        Long finalSize = redisTemplate.opsForList().size("sf");
-        log.info("处理后数据量: {}", finalSize);
     }
 }

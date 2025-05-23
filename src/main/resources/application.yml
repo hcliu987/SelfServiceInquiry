@@ -41,6 +41,6 @@ notification:
   pushplus:
     token: ${PUSHPLUS_TOKEN:00e469292f6e4bee87b718d578417329}
 qinglong:
-  url: http://118.89.200.61:5700
+  url: http://47.103.2.139:5700
   client-id: RDPeU_1p6WlL
   client-secret: s5PP776sq_RhdPIy3y9nygMW

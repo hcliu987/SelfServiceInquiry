@@ -1,6 +1,6 @@
 package com.hc.wx.mp.controller;
 
-import com.hc.wx.mp.entity.SFUser;
+import com.hc.wx.mp.entity.Lottery;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,14 +17,16 @@ public class SFController {
     @Autowired
     private RedisTemplate redisTemplate;
 
-    @PostMapping("/add")
-    @ApiOperation(value = "添加顺丰用户")
-    public void addUser(@RequestBody SFUser user) {
-        redisTemplate.opsForValue().set("sf:" + user.getPhone(), user);
-    }
 
     @PostMapping("up")
     public void up(@RequestBody String auth) {
-        redisTemplate.opsForValue().set("auth",auth);
+
+        redisTemplate.opsForValue().set("auth", auth);
+    }
+
+    @PostMapping("/save")
+    @ApiOperation(value = "添加彩票")
+    public void save(@RequestBody Lottery lottery) {
+        redisTemplate.opsForValue().set("lottery:"+lottery.getBarkId(), lottery);
     }
 }

@@ -42,7 +42,7 @@ class TaskTest {
 
     @Test
     void appointmentResults() throws InterruptedException, WxErrorException {
-        FileReader fileReader = FileReader.create(new File("/Users/liuhaicheng/Desktop/1.txt"));
+        FileReader fileReader = FileReader.create(new File("/Users/liuhaicheng/Desktop/脚本文件/2.txt"));
         String[] split = fileReader.readString().split("\n");
         for (int i = 0; i < split.length; i++) {
             redisTemplate.opsForList().leftPush("sf",split[i]);

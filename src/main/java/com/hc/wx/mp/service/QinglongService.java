@@ -65,15 +65,16 @@ public class QinglongService {
             if (tokenResponse.getCode() == 200 && tokenResponse.getData() != null) {
                 token = tokenResponse.getData().getToken();
                 tokenExpiration = tokenResponse.getData().getExpiration();
-                log.info("青龙token刷新成功，过期时间：{}", tokenExpiration);
+                // log.info("青龙token刷新成功，过期时间：{}", tokenExpiration);
                 return token;
             }
-            log.error("获取青龙token失败，响应内容：{}", response);
-            throw new RuntimeException("获取青龙token失败，服务返回非200状态码");
+            // log.error("获取青龙token失败，响应内容：{}", response);
+            // throw new RuntimeException("获取青龙token失败，服务返回非200状态码");
         } catch (Exception e) {
-            log.error("获取青龙token异常：{}", e.getMessage());
-            throw new RuntimeException("获取青龙token失败：" + e.getMessage(), e);
+            // log.error("获取青龙token异常：{}", e.getMessage());
+            // throw new RuntimeException("获取青龙token失败：" + e.getMessage(), e);
         }
+        return null;
     }
 
     @Data

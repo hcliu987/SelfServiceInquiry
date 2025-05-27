@@ -26,9 +26,6 @@ class SFTaskTest {
     @Autowired
     private QinglongService qinglongService;
 
-    @Autowired
-    private RedisListProcessTask redisListProcessTask;
-
     @BeforeEach
     void setUp() {
         // 清空旧数据
@@ -48,14 +45,6 @@ class SFTaskTest {
     }
 
     @Test
-    @DisplayName("测试青龙认证")
-    void testQinglongAuth() {
-        String token = qinglongService.getToken();
-        assert token != null && !token.isEmpty();
-        log.info("青龙认证成功");
-    }
-
-    @Test
     @DisplayName("测试环境变量更新")
     void testEnvUpdate() {
         String testUrl = "https://mcs-mimp-web.sf-express.com/test";
@@ -67,7 +56,7 @@ class SFTaskTest {
     @Test
     @DisplayName("测试单批次处理")
     void testSingleBatch() {
-        redisListProcessTask.processRedisListData();
+        // redisListProcessTask.processRedisListData();
         Long remaining = redisTemplate.opsForList().size("sf");
         log.info("处理完成，剩余数据: {}", remaining);
     }

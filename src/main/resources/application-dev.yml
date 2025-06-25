@@ -10,13 +10,7 @@ server:
   port: 80
 
 
-notice:
-  configs:
-    - brakId: VVtPqTFKkTfBFLorEvLDX3
 
-lottery:
-  APPID: vinnsglluwk0brol
-  APPSECRET: HbKwaYgoIr1DhFFZ9rFoHEHhHZB1bYUT
 
 spring:
   mvc:

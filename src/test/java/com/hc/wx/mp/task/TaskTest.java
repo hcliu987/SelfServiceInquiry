@@ -1,21 +1,15 @@
 package com.hc.wx.mp.task;
 
 import cn.hutool.core.io.file.FileReader;
-import cn.hutool.core.io.file.FileWriter;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import com.hc.wx.mp.config.LotteryProperties;
-import com.hc.wx.mp.config.NoticeProperties;
 import me.chanjar.weixin.common.error.WxErrorException;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,30 +17,18 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.LocalDate;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 @SpringBootTest
-class TaskTest {
+public class TaskTest {
 
-    @Autowired
-
-    private NoticeProperties properties;
-    @Autowired
-    private LotteryProperties lotteryProperties;
-    @Autowired
-    RedisTemplate redisTemplate;
 
     @Test
     void appointmentResults() throws InterruptedException, WxErrorException {
         FileReader fileReader = FileReader.create(new File("/Users/liuhaicheng/Desktop/脚本文件/2.txt"));
         String[] split = fileReader.readString().split("\n");
-        for (int i = 0; i < split.length; i++) {
-            redisTemplate.opsForList().leftPush("sf",split[i]);
-        }
+//        for (int i = 0; i < split.length; i++) {
+//            redisTemplate.opsForList().leftPush("sf",split[i]);
+//        }
 
     }
 

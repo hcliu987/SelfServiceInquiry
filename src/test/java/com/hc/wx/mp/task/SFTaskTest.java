@@ -10,7 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.redis.core.RedisTemplate;
+//import org.springframework.data.redis.core.RedisTemplate;
 
 import java.util.Arrays;
 import java.util.List;
@@ -20,8 +20,8 @@ import java.util.List;
 @DisplayName("顺丰数据处理测试")
 class SFTaskTest {
 
-    @Autowired
-    private RedisTemplate<String, String> redisTemplate;
+//    @Autowired
+//    private RedisTemplate<String, String> redisTemplate;
 
     @Autowired
     private QinglongService qinglongService;
@@ -29,19 +29,27 @@ class SFTaskTest {
     @BeforeEach
     void setUp() {
         // 清空旧数据
-        redisTemplate.delete("sf");
+//        redisTemplate.delete("sf");
         
         // 准备测试数据
-        List<String> testUrls = Arrays.asList(
-            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test1",
-            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test2",
-            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test3",
-            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test4",
-            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test5",
-            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test6"
-        );
+//        List<String> testUrls = Arrays.asList(
+//            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test1",
+//            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test2",
+//            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test3",
+//            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test4",
+//            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test5",
+//            "https://mcs-mimp-web.sf-express.com/mcs-mimp/share/app/activityRedirect?sign=test6"
+//        );
         
-        testUrls.forEach(url -> redisTemplate.opsForList().rightPush("sf", url));
+//        testUrls.forEach(url -> redisTemplate.opsForList().rightPush("sf", url));
+    }
+
+    @Test
+    @DisplayName("测试青龙认证")
+    void testQinglongAuth() {
+        String token = qinglongService.getToken();
+        assert token != null && !token.isEmpty();
+        log.info("青龙认证成功");
     }
 
     @Test
@@ -53,13 +61,6 @@ class SFTaskTest {
         log.info("环境变量更新成功");
     }
 
-    @Test
-    @DisplayName("测试单批次处理")
-    void testSingleBatch() {
-        // redisListProcessTask.processRedisListData();
-        Long remaining = redisTemplate.opsForList().size("sf");
-        log.info("处理完成，剩余数据: {}", remaining);
-    }
 
     @Test
     @DisplayName("测试完整流程")

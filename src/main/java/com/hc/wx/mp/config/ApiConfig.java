@@ -14,9 +14,9 @@ public class ApiConfig {
     private String searchPath;
     private String token;
     private String searchXpath;
-    
+
     private ThreadPoolConfig threadPool = new ThreadPoolConfig();
-    
+
     @Data
     public static class ThreadPoolConfig {
         private int coreSize = 8;

@@ -3,7 +3,6 @@ package com.hc.wx.mp.handler;
 import cn.hutool.http.HttpUtil;
 import cn.hutool.json.JSONUtil;
 import com.hc.wx.mp.builder.TextBuilder;
-import com.hc.wx.mp.config.LotteryProperties;
 import com.hc.wx.mp.service.SearchService;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -15,7 +14,6 @@ import me.chanjar.weixin.mp.bean.message.WxMpXmlOutMessage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.net.URLEncoder;
 import java.util.*;
 
 import static me.chanjar.weixin.common.api.WxConsts.XmlMsgType;
@@ -28,11 +26,6 @@ import static me.chanjar.weixin.common.api.WxConsts.XmlMsgType;
 @Component
 public class MsgHandler extends AbstractHandler {
 
-
-    @Autowired
-    private LotteryProperties lotteryProperties;
-//    @Autowired
-//    private RedisCache redisCache;
 
     @Autowired
     SearchService service;
@@ -63,20 +56,6 @@ public class MsgHandler extends AbstractHandler {
 
     }
 
-    private void extracted(WxMpXmlMessage wxMessage, String content) {
-        String originalString = "http://139.196.92.81/res/show.html?r=" + content;
-        String encodedString = Base64.getEncoder().encodeToString(originalString.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        Map<String, Object> paramMap = new HashMap<>();
-        System.out.println("获取当前用户输出内容" + wxMessage.getFromUser());
-        System.out.println(wxMessage.getToUser());
-        paramMap.put("url", encodedString);
-        paramMap.put("app_id", lotteryProperties.getAPPID());
-        paramMap.put("app_secret", lotteryProperties.getAPPSECRET());
-        String result = HttpUtil.get("https://www.mxnzp.com/api/lottery/common/check", paramMap);
-        ResultMsg bean = JSONUtil.toBean(result, ResultMsg.class);
-        System.out.println(bean.toString());
-    }
-
 
     @Data
     @ToString
@@ -93,27 +72,5 @@ public class MsgHandler extends AbstractHandler {
         private String url;
     }
 
-
-    public static void main(String[] args) throws Exception {
-        String encode = URLEncoder.encode("江河日上", "UTF-8");
-        String originalString = "http://127.0.0.1/res/show?r=" + encode;
-        String encodedString = Base64.getEncoder().encodeToString(originalString.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        Map<String, Object> paramMap = new HashMap<>();
-        paramMap.put("url", encodedString);
-        paramMap.put("app_id", "vinnsglluwk0brol");
-        paramMap.put("app_secret", "HbKwaYgoIr1DhFFZ9rFoHEHhHZB1bYUT");
-        String result = HttpUtil.get("https://www.mxnzp.com/api/shortlink/create", paramMap);
-        ResultMsg bean = JSONUtil.toBean(result, ResultMsg.class);
-        System.out.println(bean.data.shortUrl);
-        {
-            {
-                {
-                    {
-                    }
-                }
-            }
-        }
-
-    }
 
 }

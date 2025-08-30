@@ -16,15 +16,34 @@ spring:
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher
+  redis:
+    database: 0
+    host: redis-14497.c52.us-east-1-4.ec2.redns.redis-cloud.com
+    port: 14497
+    username: default
+    password: TL8Z6Eh6QHCD2QX1t0moAzCujC6W8xKL
 api:
   search:
     base-url: http://m.kkqws.com
+    uukk-base-url: http://uukk6.cn
     juzi-path: /v/api/getJuzi
     xiaoyu-path: /v/api/getXiaoyu
     search-path: /v/api/search
     searchx-path: /v/api/getSearchX
     token: i69
+    ttzjb-path: /v/api/getTTZJB
+    dyfx-path: /v/api/getDyfx
+    juzi2-path: /v/api/getJuzi
+    uukk-token: nd9pnq356a8
+    uukk6-token: uukk6
+    girls-path: /v/api/getGirls
+    xiaoy-path: /v/api/getXiaoy
+    ggang-path: /v/api/getGGang
+    kkqws-token: i69
 qinglong:
   url: http://47.103.2.139:5700
-  client-id: RDPeU_1p6WlL
-  client-secret: s5PP776sq_RhdPIy3y9nygMW
+bark:
+  key: qEnhyuDqQAcAtCKRCBWJ4e
+
+
+

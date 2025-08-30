@@ -14,6 +14,15 @@ public class ApiConfig {
     private String searchPath;
     private String token;
     private String searchXpath;
+    private String ttzjbPath;
+    private String dyfxPath;
+    private String juzi2Path;
+    private String girlsPath;
+    private String xiaoyPath;
+    private String ggangPath;
+    private String uukk6Token;
+    private String uukkBaseUrl;
+    private String kkqwsToken;
 
     private ThreadPoolConfig threadPool = new ThreadPoolConfig();
 

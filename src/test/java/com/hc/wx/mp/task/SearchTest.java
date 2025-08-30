@@ -1,6 +1,10 @@
 package com.hc.wx.mp.task;
 
+import com.hc.wx.mp.service.LotteryService;
 import com.hc.wx.mp.service.SearchService;
+
+import java.util.Collections;
+import java.util.List;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,10 +19,32 @@ public class SearchTest {
     @Autowired
     private SearchService service;
 
+    @Autowired
+    private LotteryService lotteryService;
+
 //    @Autowired
 //    RedisTemplate redisTemplate;
     @Test
     public void test() throws Exception {
 //        redisTemplate.delete("lottery:qEnhyuDqQAcAtCKRCBWJ4e");
+    }
+
+    @Test
+    public void testSearchParallel() throws Exception {
+        String query = "美国队长";
+        String result = service.searchUukkAll(query);
+        System.out.println("searchParallel result: " + result);
+        assert result != null && !result.isEmpty();
+    }
+
+    @Test
+    public void testLottery() throws InterruptedException {
+        // 这是一个示例 openid，请替换为有效的测试 openid
+        String openid = "o-R_i6-b-i-z-Z_z-Z_z-Z_z-Z_z";
+        // 示例彩票号码
+        List<String> numbers = Collections.singletonList("01 02 03 04 05 06-07");
+        lotteryService.processLotteryForUser(openid, numbers);
+        // 等待异步方法执行
+        Thread.sleep(3000);
     }
 }

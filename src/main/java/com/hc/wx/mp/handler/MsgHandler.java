@@ -3,6 +3,8 @@ package com.hc.wx.mp.handler;
 import com.hc.wx.mp.builder.TextBuilder;
 import com.hc.wx.mp.service.LotteryService;
 import com.hc.wx.mp.service.SearchService;
+import com.hc.wx.mp.service.ResultStorageService;
+import com.hc.wx.mp.service.UrlService;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import me.chanjar.weixin.common.session.WxSessionManager;
@@ -35,6 +37,12 @@ public class MsgHandler extends AbstractHandler {
     @Lazy
     @Autowired
     private LotteryService lotteryService;
+    
+    @Autowired
+    private ResultStorageService resultStorageService;
+    
+    @Autowired
+    private UrlService urlService;
 
     @Override
     public WxMpXmlOutMessage handle(WxMpXmlMessage wxMessage,
@@ -103,15 +111,24 @@ public class MsgHandler extends AbstractHandler {
         }
 
         try {
-            content = service.searchAndMerge(content);
+            content = service.searchAndMergeRaw(content);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
         if (content.length() < 1) {
             content = "没查询到相关内容";
+            logger.info("当前用户{}查询的内容:{}", fromUser, content);
+            return new TextBuilder().build(content, wxMessage, weixinService);
         }
-        logger.info("当前用户{}查询的内容:{}", fromUser, content);
-        return new TextBuilder().build(content, wxMessage, weixinService);
+        
+        // 存储搜索结果并生成短链接
+        String resultKey = resultStorageService.storeResult(content);
+        String resultUrl = urlService.generateResultUrl(resultKey);
+        String shortUrl = urlService.shortenUrl(resultUrl);
+        
+        String responseMessage = "🔍 搜索完成！点击链接查看详细结果：\n" + shortUrl;
+        logger.info("当前用户{}搜索完成，返回链接:{}", fromUser, shortUrl);
+        return new TextBuilder().build(responseMessage, wxMessage, weixinService);
 
     }
 

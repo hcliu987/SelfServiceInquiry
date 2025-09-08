@@ -1,5 +1,9 @@
 package com.hc.wx.mp.service;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import cn.hutool.core.util.StrUtil;
 import com.hc.wx.mp.config.ApiConfig;
 import com.hc.wx.mp.entity.TokenResponse;
@@ -22,6 +26,30 @@ import java.util.zip.GZIPInputStream;
 @Service
 @Slf4j
 public class SearchService {
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class SearchResult {
+        private List<AnswerItem> list;
+        public List<AnswerItem> getList() { return list; }
+        public void setList(List<AnswerItem> list) { this.list = list; }
+    }
+
+    /**
+     * 答案项数据类，用于映射JSON响应中的list数组元素
+     * 包含answer和question字段，符合API响应格式
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class AnswerItem {
+        /** 答案内容，通常包含链接和提取码等信息 */
+        private String answer;
+        /** 问题标题，用作展示名称 */
+        private String question;
+        
+        public String getAnswer() { return answer; }
+        public void setAnswer(String answer) { this.answer = answer; }
+        public String getQuestion() { return question; }
+        public void setQuestion(String question) { this.question = question; }
+    }
     private final ApiConfig apiConfig;
     private final ExecutorService executorService;
     private static final int TIMEOUT_MILLIS = 300;
@@ -52,9 +80,173 @@ public class SearchService {
         futures.add(createSearchFuture(() -> getXiaoyuKkqws(text), "getXiaoyuKkqws"));
         futures.add(createSearchFuture(() -> searchKkqws(text), "searchKkqws"));
         futures.add(createSearchFuture(() -> getDyfxKkqws(text), "getDyfxKkqws"));
-        return getFirstValidResult(futures, "searchAndMerge");
+        String jsonResponse = getFirstValidResult(futures, "searchAndMerge");
+
+        if (StrUtil.isBlank(jsonResponse)) {
+            return "";
+        }
+
+        try {
+            SearchResult result = JsonUtils.fromJson(jsonResponse, SearchResult.class);
+            if (result == null || result.getList() == null || result.getList().isEmpty()) {
+                return "未找到相关内容。";
+            }
+            
+            StringBuilder finalResult = new StringBuilder();
+            finalResult.append(text).append(":\n");
+
+            List<String> allLinks = new ArrayList<>();
+            for (AnswerItem item : result.getList()) {
+                if (StrUtil.isNotBlank(item.getAnswer())) {
+                    Pattern linkPattern = Pattern.compile("https?:\\/\\/[^\\s\"'<>]+");
+                    Matcher matcher = linkPattern.matcher(item.getAnswer());
+                    while (matcher.find()) {
+                        allLinks.add(matcher.group());
+                    }
+                }
+            }
+            finalResult.append(String.join("\n", allLinks));
+            System.out.println(finalResult.toString());
+            return finalResult.toString();
+
+        } catch (Exception e) {
+            log.error("格式化搜索结果失败, JSON: {}", jsonResponse, e);
+            return jsonResponse;
+        }
     }
 
+    /**
+     * 多线程获取数据并合并，处理JSON数据提取answer作为链接内容，question作为展示名称
+     * 
+     * 功能说明：
+     * 1. 使用固定大小的线程池进行多线程数据获取
+     * 2. 收集所有线程的执行结果，保证数据完整性
+     * 3. 解析JSON响应提取question和answer字段
+     * 4. 按照【标题】\n内容\n\n的格式输出
+     * 
+     * 遵循JSON数据处理规范：
+     * - 仅提取answer字段作为链接展示
+     * - question字段作为展示标题
+     * - 格式化输出为【标题】\n内容\n\n的形式
+     * 
+     * @param text 搜索关键词
+     * @return 格式化后的搜索结果字符串，包含所有数据源的结果
+     */
+    public String searchAndMergeRaw(String text) {
+        log.info("开始多线程数据获取并处理，查询内容: {}", text);
+        
+        List<CompletableFuture<String>> futures = new ArrayList<>();
+        futures.add(createSearchFuture(() -> getJuziKkqws(text), "getJuziKkqws"));
+        futures.add(createSearchFuture(() -> getXiaoyuKkqws(text), "getXiaoyuKkqws"));
+        futures.add(createSearchFuture(() -> searchKkqws(text), "searchKkqws"));
+        futures.add(createSearchFuture(() -> getDyfxKkqws(text), "getDyfxKkqws"));
+        
+        // 收集所有结果
+        List<String> allResults = new ArrayList<>();
+        long startTime = System.currentTimeMillis();
+        
+        // 等待所有任务完成或超时
+        while (System.currentTimeMillis() - startTime < TIMEOUT_MILLIS && !futures.isEmpty()) {
+            futures.removeIf(future -> {
+                if (future.isDone()) {
+                    try {
+                        String result = future.get();
+                        if (!result.isEmpty() && !isInvalidResult(result)) {
+                            allResults.add(result);
+                            log.info("获取到有效结果，长度: {} 字符", result.length());
+                            log.info("原始JSON数据: {}", result);
+                        } else {
+                            log.warn("获取到无效或空结果");
+                        }
+                    } catch (Exception e) {
+                        log.error("获取结果时发生异常", e);
+                    }
+                    return true;
+                }
+                return false;
+            });
+            
+            if (!futures.isEmpty()) {
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        
+        // 记录汇总信息
+        log.info("多线程数据获取完成，共收集到 {} 个有效结果", allResults.size());
+        
+        if (allResults.isEmpty()) {
+            log.warn("未获取到任何有效数据");
+            return "";
+        }
+        
+        // 处理JSON数据，提取question和answer字段
+        StringBuilder finalResult = new StringBuilder();
+        List<ResultItem> processedItems = new ArrayList<>();
+        
+        for (String jsonResult : allResults) {
+            try {
+                SearchResult searchResult = JsonUtils.fromJson(jsonResult, SearchResult.class);
+                if (searchResult != null && searchResult.getList() != null) {
+                    for (AnswerItem item : searchResult.getList()) {
+                        if (StrUtil.isNotBlank(item.getAnswer())) {
+                            ResultItem resultItem = new ResultItem();
+                            // 使用question作为展示名称，如果没有question则使用搜索关键词
+                            resultItem.setTitle(StrUtil.isNotBlank(item.getQuestion()) ? item.getQuestion() : text);
+                            resultItem.setContent(item.getAnswer());
+                            processedItems.add(resultItem);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.error("解析JSON数据失败: {}", jsonResult, e);
+                // 如果JSON解析失败，尝试简单的文本处理
+                if (jsonResult.contains("answer")) {
+                    ResultItem resultItem = new ResultItem();
+                    resultItem.setTitle(text);
+                    resultItem.setContent(jsonResult);
+                    processedItems.add(resultItem);
+                }
+            }
+        }
+        
+        if (processedItems.isEmpty()) {
+            log.warn("未能从JSON数据中提取到有效的内容项");
+            return "未找到相关内容";
+        }
+        
+        // 格式化输出
+        for (ResultItem item : processedItems) {
+            finalResult.append("【").append(item.getTitle()).append("】\n");
+            finalResult.append(item.getContent()).append("\n\n");
+        }
+        
+        String result = finalResult.toString().trim();
+        log.info("处理完成，共提取 {} 个内容项，总长度: {} 字符", processedItems.size(), result.length());
+        log.info("最终处理结果: {}", result);
+        
+        return result;
+    }
+    
+    /**
+     * 结果项数据类，用于内部数据处理和格式化
+     * 将解析后的JSON数据转换为统一的结果格式
+     */
+    private static class ResultItem {
+        /** 展示标题，来自question字段或搜索关键词 */
+        private String title;
+        /** 内容信息，来自answer字段，包含链接和提取码 */
+        private String content;
+        
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+        public String getContent() { return content; }
+        public void setContent(String content) { this.content = content; }
+    }
     /**
      * uukk6.cn 的主搜索入口。
      * 自动获取Token，然后并发调用所有API，并返回第一个有效结果。

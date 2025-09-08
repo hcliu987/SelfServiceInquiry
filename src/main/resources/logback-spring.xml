@@ -65,7 +65,7 @@
 
     <!-- 例如，生产环境(prod)同时输出到控制台和文件 -->
     <springProfile name="prod">
-        <root level="INFO">
+        <root level="DEBUG">
             <appender-ref ref="CONSOLE" />
             <appender-ref ref="FILE_INFO" />
             <appender-ref ref="FILE_ERROR" /> <!-- 如果配置了错误日志文件，也引用它 -->

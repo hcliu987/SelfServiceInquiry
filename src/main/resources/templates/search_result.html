@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>搜索结果</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            position: relative;
+        }
+
+        /* 背景装饰元素 */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(120, 119, 198, 0.2) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+            animation: rotate 20s linear infinite;
+        }
+
+        @keyframes rotate {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .header-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .search-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 20px;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: white;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            color: white;
+            margin: 0;
+            font-size: 32px;
+            font-weight: 700;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .header .subtitle {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 16px;
+            margin-top: 10px;
+        }
+
+        /* 内容展示区域样式 */
+        .content {
+            padding: 40px;
+        }
+
+        /* 内容显示容器 - 白色卡片背景 */
+        .content-display {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            border: 2px solid #e0e0e0;
+            overflow: hidden;
+        }
+
+        /* 格式化内容样式 - 保持原始格式和换行 */
+        .formatted-content {
+            padding: 30px;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.8;
+            color: #333;
+            white-space: pre-wrap;
+            /* 保持换行和空白字符 */
+            word-wrap: break-word;
+            /* 长单词自动换行 */
+            background: transparent;
+            border: none;
+        }
+
+        /* 链接样式 - 自动识别的HTTP链接 */
+        .formatted-content a {
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        .formatted-content a:hover {
+            text-decoration: underline;
+        }
+
+
+
+        .text-line {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 12px;
+            color: #555;
+            line-height: 1.6;
+            border-left: 4px solid #667eea;
+        }
+
+        .footer {
+            background: #f8f9ff;
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #eee;
+        }
+
+        .footer-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .result-id-badge {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .timestamp {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .error-message {
+            text-align: center;
+            padding: 60px 40px;
+        }
+
+        .error-icon {
+            width: 100px;
+            height: 100px;
+            margin: 0 auto 30px;
+            background: linear-gradient(135deg, #ff6b6b, #ffa500);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 50px;
+            color: white;
+        }
+
+        .error-text {
+            color: #666;
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+
+        .back-button {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .back-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                border-radius: 16px;
+            }
+
+            .header {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 24px;
+            }
+
+            .search-icon {
+                width: 60px;
+                height: 60px;
+                font-size: 30px;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            .link-item {
+                padding: 20px;
+            }
+
+            .footer-content {
+                flex-direction: column;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-content">
+                <div class="search-icon">🔍</div>
+                <h1>搜索结果</h1>
+                <div class="subtitle">为您找到了相关内容</div>
+            </div>
+        </div>
+
+        <div class="content" th:if="${content}">
+            <!-- 直接展示格式化后的内容 -->
+            <!-- 使用pre标签保持原始格式，包括换行和空格 -->
+            <!-- 根据JSON数据处理规范，内容已格式化为【标题】\n链接\n\n的形式 -->
+            <div class="content-display">
+                <pre th:text="${content}" class="formatted-content"></pre>
+            </div>
+        </div>
+
+        <div th:if="${error}" class="error-message">
+            <div class="error-icon">❌</div>
+            <div class="error-text" th:text="${error}"></div>
+            <button class="back-button" onclick="history.back()">返回</button>
+        </div>
+
+        <div class="footer">
+            <div class="footer-content">
+                <div>
+                    <div class="result-id-badge">ID: <span th:text="${key}">unknown</span></div>
+                </div>
+                <div class="timestamp">
+                    🤖 微信搜索服务 · <span th:text="${#dates.format(#dates.createNow(), 'yyyy-MM-dd HH:mm')}">2023-12-01
+                        12:00</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * 页面初始化
+         * 在DOM加载完成后执行内容格式化
+         */
+        document.addEventListener('DOMContentLoaded', function () {
+            console.log('搜索结果页面加载完成');
+            formatContentLinks();
+        });
+
+        /**
+         * 格式化内容中的链接和样式
+         * 功能说明：
+         * 1. 将HTTP/HTTPS链接转换为可点击的链接
+         * 2. 高亮显示标题（以【开头的行）
+         * 3. 高亮显示提取码信息
+         * 
+         * 遵循页面展示规范：
+         * - 标题以【开头并加粗显示
+         * - 每个链接单独一行展示
+         * - 提取码需要高亮显示
+         */
+        function formatContentLinks() {
+            const contentElement = document.querySelector('.formatted-content');
+            if (!contentElement) return;
+
+            let content = contentElement.textContent;
+
+            // 将HTTP/HTTPS链接替换为可点击的链接（在新标签页打开）
+            content = content.replace(/(https?:\/\/[^\s\n]+)/g, '<a href="$1" target="_blank">$1</a>');
+
+            // 高亮标题（以【开头的行），符合JSON数据处理规范
+            content = content.replace(/(【[^】]+】)/g, '<strong style="color: #333; font-size: 16px; display: block; margin: 15px 0 10px 0;">$1</strong>');
+
+            // 高亮提取码（提取码：后跟数字/字母）
+            content = content.replace(/(提取码[：:]\s*\w+)/g, '<span style="background: #e3f2fd; padding: 2px 8px; border-radius: 4px; color: #1976d2; font-weight: 600;">$1</span>');
+
+            // 将处理后的HTML内容设置回元素
+            contentElement.innerHTML = content;
+        }
+    </script>
+</body>
+
+</html>

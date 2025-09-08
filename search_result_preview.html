@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang=\"zh-CN\">
+
+<head>
+    <meta charset=\"UTF-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+    <title>搜索结果页面预览</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            position: relative;
+        }
+
+        /* 背景装饰元素 */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(120, 119, 198, 0.2) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+            animation: rotate 20s linear infinite;
+        }
+
+        @keyframes rotate {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .header-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .search-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 20px;
+            background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: white;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            color: white;
+            margin: 0;
+            font-size: 32px;
+            font-weight: 700;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .header .subtitle {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 16px;
+            margin-top: 10px;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .result-stats {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 16px;
+            margin-bottom: 30px;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .link-item {
+            background: white;
+            margin: 20px 0;
+            padding: 25px;
+            border-radius: 16px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+            border: 1px solid #f0f0f0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .link-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 0 2px 2px 0;
+        }
+
+        .link-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
+        }
+
+        .link-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            color: white;
+            font-size: 20px;
+            vertical-align: top;
+        }
+
+        .link-content {
+            display: inline-block;
+            vertical-align: top;
+            width: calc(100% - 70px);
+        }
+
+        .link-item a {
+            color: #333;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 16px;
+            word-break: break-all;
+            line-height: 1.5;
+        }
+
+        .link-item a:hover {
+            color: #667eea;
+        }
+
+        .link-preview {
+            color: #666;
+            font-size: 14px;
+            margin-top: 8px;
+            line-height: 1.4;
+        }
+
+        .text-line {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 12px;
+            color: #555;
+            line-height: 1.6;
+            border-left: 4px solid #667eea;
+        }
+
+        .footer {
+            background: #f8f9ff;
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #eee;
+        }
+
+        .footer-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .result-id-badge {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .timestamp {
+            color: #666;
+            font-size: 14px;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                border-radius: 16px;
+            }
+
+            .header {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 24px;
+            }
+
+            .search-icon {
+                width: 60px;
+                height: 60px;
+                font-size: 30px;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            .link-item {
+                padding: 20px;
+            }
+
+            .footer-content {
+                flex-direction: column;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class=\"container\">
+        <div class=\"header\">
+            <div class=\"header-content\">
+                <div class=\"search-icon\">🔍</div>
+                <h1>搜索结果</h1>
+                <div class=\"subtitle\">为您找到了相关内容</div>
+            </div>
+        </div>
+
+        <div class=\"content\">
+            <div class=\"result-stats\">
+                📊 共找到 5 项结果
+            </div>
+
+            <div class=\"text-line\">
+                📝 <span>Spring Boot学习资源:</span>
+            </div>
+
+            <div class=\"link-item\">
+                <div class=\"link-icon\">🔗</div>
+                <div class=\"link-content\">
+                    <a href=\"https://spring.io/projects/spring-boot\"
+                        target=\"_blank\">https://spring.io/projects/spring-boot</a>
+                    <div class=\"link-preview\">点击访问此链接</div>
+                </div>
+            </div>
+
+            <div class=\"link-item\">
+                <div class=\"link-icon\">🔗</div>
+                <div class=\"link-content\">
+                    <a href=\"https://docs.spring.io/spring-boot/docs/current/reference/html/\"
+                        target=\"_blank\">https://docs.spring.io/spring-boot/docs/current/reference/html/</a>
+                    <div class=\"link-preview\">点击访问此链接</div>
+                </div>
+            </div>
+
+            <div class=\"text-line\">
+                📝 <span>官方文档和教程</span>
+            </div>
+
+            <div class=\"link-item\">
+                <div class=\"link-icon\">🔗</div>
+                <div class=\"link-content\">
+                    <a href=\"https://github.com/spring-projects/spring-boot\"
+                        target=\"_blank\">https://github.com/spring-projects/spring-boot</a>
+                    <div class=\"link-preview\">点击访问此链接</div>
+                </div>
+            </div>
+
+            <div class=\"text-line\">
+                📝 <span>更多学习资料请参考官方文档</span>
+            </div>
+        </div>
+
+        <div class=\"footer\">
+            <div class=\"footer-content\">
+                <div>
+                    <div class=\"result-id-badge\">ID: abc12345</div>
+                </div>
+                <div class=\"timestamp\">
+                    🤖 微信搜索服务 · 2023-12-08 16:30
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

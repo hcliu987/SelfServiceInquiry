@@ -55,6 +55,21 @@ public class MsgHandler extends AbstractHandler {
 
         String content = wxMessage.getContent();
         String fromUser = wxMessage.getFromUser();
+        
+        // 优化：输入验证
+        if (content == null || content.trim().isEmpty()) {
+            return new TextBuilder().build("请输入有效的搜索内容", wxMessage, weixinService);
+        }
+        
+        content = content.trim();
+        
+        // 优化：限制输入长度，避免恶意输入
+        if (content.length() > 100) {
+            return new TextBuilder().build("搜索内容过长，请输入100字符以内的内容", wxMessage, weixinService);
+        }
+
+        // 优化：提前记录用户请求
+        logger.info("用户 {} 搜索内容: {}", fromUser, content);
 
         //
         // 主要业务逻辑：处理彩票号码和预约
@@ -110,25 +125,34 @@ public class MsgHandler extends AbstractHandler {
             return new TextBuilder().build(lotteryInfo, wxMessage, weixinService);
         }
 
+        // 优化：搜索处理和错误处理
+        String searchResult;
         try {
-            content = service.searchAndMergeRaw(content);
+            searchResult = service.searchAndMergeRaw(content);
         } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-        if (content.length() < 1) {
-            content = "没查询到相关内容";
-            logger.info("当前用户{}查询的内容:{}", fromUser, content);
-            return new TextBuilder().build(content, wxMessage, weixinService);
+            logger.error("搜索服务异常，用户: {}, 查询内容: {}", fromUser, content, e);
+            return new TextBuilder().build("搜索服务暂时不可用，请稍后再试", wxMessage, weixinService);
         }
         
-        // 存储搜索结果并生成短链接
-        String resultKey = resultStorageService.storeResult(content);
-        String resultUrl = urlService.generateResultUrl(resultKey);
-        String shortUrl = urlService.shortenUrl(resultUrl);
+        if (searchResult == null || searchResult.length() < 1) {
+            String noResultMessage = "🔍 未找到相关内容，请尝试其他关键词";
+            logger.info("用户 {} 搜索无结果: {}", fromUser, content);
+            return new TextBuilder().build(noResultMessage, wxMessage, weixinService);
+        }
         
-        String responseMessage = "🔍 搜索完成！点击链接查看详细结果：\n" + shortUrl;
-        logger.info("当前用户{}搜索完成，返回链接:{}", fromUser, shortUrl);
-        return new TextBuilder().build(responseMessage, wxMessage, weixinService);
+        // 优化：存储搜索结果和错误处理
+        try {
+            String resultKey = resultStorageService.storeResult(searchResult);
+            String resultUrl = urlService.generateResultUrl(resultKey);
+            String shortUrl = urlService.shortenUrl(resultUrl);
+            
+            String responseMessage = "🔍 搜索完成！点击链接查看详细结果：\n" + shortUrl;
+            logger.info("用户 {} 搜索成功，返回短链接: {}", fromUser, shortUrl);
+            return new TextBuilder().build(responseMessage, wxMessage, weixinService);
+        } catch (Exception e) {
+            logger.error("生成短链接失败，用户: {}", fromUser, e);
+            return new TextBuilder().build("生成结果链接失败，请稍后再试", wxMessage, weixinService);
+        }
 
     }
 

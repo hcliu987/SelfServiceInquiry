@@ -1,0 +1,46 @@
+# 性能优化配置
+# 在application.yml中添加以下配置
+
+# API搜索配置优化
+api:
+  search:
+    base-url: http://m.kkqws.com
+    uukk-base-url: http://uukk6.cn
+    # ... 其他配置保持不变 ...
+    
+    # 新增：HTTP连接配置
+    http:
+      connect-timeout: 5000      # 连接超时(ms)
+      read-timeout: 10000        # 读取超时(ms)  
+      max-connections: 200       # 最大连接数
+      max-connections-per-route: 50  # 每路由最大连接数
+    
+    # 线程池配置优化
+    thread-pool:
+      core-size: 8              # 核心线程数
+      max-size: 16              # 最大线程数
+      queue-capacity: 100       # 队列容量(增加)
+      keep-alive-seconds: 60    # 空闲时间(增加)
+
+# Spring Boot性能优化
+server:
+  tomcat:
+    threads:
+      max: 200                  # 最大线程数
+      min-spare: 10            # 最小空闲线程数
+    connection-timeout: 20000   # 连接超时
+    max-connections: 8192      # 最大连接数
+  
+# JVM优化建议(启动参数)
+# -Xms512m -Xmx1024m 
+# -XX:+UseG1GC 
+# -XX:MaxGCPauseMillis=200
+# -XX:+HeapDumpOnOutOfMemoryError
+
+# 日志优化
+logging:
+  level:
+    com.hc.wx.mp.service.SearchService: INFO
+    org.springframework.web: WARN
+  pattern:
+    console: '%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n'

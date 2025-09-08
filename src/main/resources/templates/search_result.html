@@ -139,14 +139,10 @@
             border: none;
         }
 
-        /* 链接样式 - 自动识别的HTTP链接 */
-        .formatted-content a {
+        /* 链接样式 - 高亮显示的文本样式（不可点击） */
+        .formatted-content span[style*="color: #007bff"] {
             color: #007bff;
-            text-decoration: none;
-        }
-
-        .formatted-content a:hover {
-            text-decoration: underline;
+            font-weight: 500;
         }
 
 
@@ -322,13 +318,13 @@
         /**
          * 格式化内容中的链接和样式
          * 功能说明：
-         * 1. 将HTTP/HTTPS链接转换为可点击的链接
+         * 1. 高亮显示HTTP/HTTPS链接（不可点击）
          * 2. 高亮显示标题（以【开头的行）
          * 3. 高亮显示提取码信息
          * 
          * 遵循页面展示规范：
          * - 标题以【开头并加粗显示
-         * - 每个链接单独一行展示
+         * - 每个链接单独一行展示（纯文本显示）
          * - 提取码需要高亮显示
          */
         function formatContentLinks() {
@@ -337,8 +333,8 @@
 
             let content = contentElement.textContent;
 
-            // 将HTTP/HTTPS链接替换为可点击的链接（在新标签页打开）
-            content = content.replace(/(https?:\/\/[^\s\n]+)/g, '<a href="$1" target="_blank">$1</a>');
+            // 高亮HTTP/HTTPS链接（不添加href跳转功能，只高亮显示）
+            content = content.replace(/(https?:\/\/[^\s\n]+)/g, '<span style="color: #007bff; font-weight: 500;">$1</span>');
 
             // 高亮标题（以【开头的行），符合JSON数据处理规范
             content = content.replace(/(【[^】]+】)/g, '<strong style="color: #333; font-size: 16px; display: block; margin: 15px 0 10px 0;">$1</strong>');

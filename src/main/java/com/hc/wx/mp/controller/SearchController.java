@@ -1,35 +1,30 @@
 package com.hc.wx.mp.controller;
 
-
-import com.hc.wx.mp.entity.JsonsRootBean;
-import com.hc.wx.mp.service.SearchService;
 import com.hc.wx.mp.service.ResultStorageService;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 
-import java.net.URLEncoder;
-import java.util.List;
-
+/**
+ * 搜索结果控制器
+ * 负责处理搜索结果页面展示
+ */
 @Controller
-public class SearchContoller {
-
-    @Autowired
-    SearchService searchService;
+@RequiredArgsConstructor
+public class SearchController {
     
-    @Autowired
-    ResultStorageService resultStorageService;
+    private final ResultStorageService resultStorageService;
     
-    /**
-     * 封装查询结果,
-     */
-
-
     /**
      * 显示查询结果页面
+     * 
+     * @param key 结果唯一标识符
+     * @param model 模型对象
+     * @return 视图名称
      */
-    @RequestMapping("/result/{key}")
+    @GetMapping("/result/{key}")
     public String showResult(@PathVariable String key, Model model) {
         String content = resultStorageService.getResult(key);
         if (content == null) {
@@ -41,6 +36,4 @@ public class SearchContoller {
         model.addAttribute("key", key);
         return "search_result";
     }
-
-
 }

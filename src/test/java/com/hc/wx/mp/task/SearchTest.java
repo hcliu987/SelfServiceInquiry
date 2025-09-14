@@ -1,5 +1,6 @@
 package com.hc.wx.mp.task;
 
+import com.hc.wx.mp.handler.MsgHandler;
 import com.hc.wx.mp.service.LotteryService;
 import com.hc.wx.mp.service.SearchService;
 
@@ -20,6 +21,8 @@ public class SearchTest {
     private SearchService service;
 
     @Autowired
+    MsgHandler handler;
+    @Autowired
     private LotteryService lotteryService;
 
 //    @Autowired
@@ -31,10 +34,9 @@ public class SearchTest {
 
     @Test
     public void testSearchParallel() throws Exception {
-        String query = "美国队长";
-        String result = service.searchUukkAll(query);
-        System.out.println("searchParallel result: " + result);
-        assert result != null && !result.isEmpty();
+        String query = "天然子结构";
+        String s = handler.performConcurrentSearch(query, "1");
+        System.out.printf("", s);
     }
 
     @Test

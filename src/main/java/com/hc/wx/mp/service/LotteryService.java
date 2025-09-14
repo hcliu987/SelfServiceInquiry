@@ -27,15 +27,30 @@ import java.util.stream.Collectors;
 @Slf4j
 public class LotteryService {
 
+    // ================================ 常量定义 ================================
+    private static final String LOTTERY_RESULT_URL = 
+        "http://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=1";
+    private static final String BARK_URL_TEMPLATE = "https://api.day.app/%s";
+    private static final String REDIS_LOTTERY_KEY_PREFIX = "lottery:schedule:";
+    private static final String USER_AGENT = "Apifox/1.0.0 (https://apifox.com)";
+    private static final String INVALID_BARK_KEY = "your_bark_key_here";
+    
+    // 奖项映射
+    private static final Map<Integer, String> PRIZE_TYPE_NAMES = Map.of(
+        1, "一等奖", 2, "二等奖", 3, "三等奖", 
+        4, "四等奖", 5, "五等奖", 6, "六等奖"
+    );
+
+    // ================================ 依赖注入 ================================
     @Autowired
     private StringRedisTemplate redisTemplate;
 
     @Value("${bark.key}")
     private String barkKey;
 
-    private static final String LOTTERY_RESULT_URL = "http://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=1";
-    private static final String BARK_URL_TEMPLATE = "https://api.day.app/%s";
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient();
+
+    // ================================ 公开API方法 ================================
 
     /**
      * 异步处理用户提交的彩票号码。
@@ -43,6 +58,7 @@ public class LotteryService {
     @Async
     public void processLotteryForUser(String openid, List<String> numberStrings) {
         log.info("开始为用户 {} 处理 {} 组彩票数据...", openid, numberStrings.size());
+        
         LotteryResult winningNumbers = fetchLatestLotteryResult();
         if (winningNumbers == null) {
             log.warn("获取最新彩票数据失败，无法为用户 {} 处理。", openid);
@@ -50,12 +66,8 @@ public class LotteryService {
         }
 
         String notificationContent = buildConsolidatedNotification(numberStrings, winningNumbers);
-        System.out.println(notificationContent);
-        // 通过检查通知内容中是否包含 "奖" 字来判断是否中奖
-        boolean anyWins = notificationContent.contains("等奖");
-
-        String notificationTitle = anyWins ?  "🎉恭喜您中奖啦！":"🤷‍♂️本次未中奖" ;
-
+        String notificationTitle = determineNotificationTitle(notificationContent);
+        
         sendBarkNotification(notificationTitle, notificationContent);
         log.info("为用户 {} 整合后的彩票结果通知已发送。", openid);
     }
@@ -65,7 +77,7 @@ public class LotteryService {
      */
     public void scheduleLotteryCheck(String openid, List<String> numberStrings, String issue) {
         String numbersData = String.join(";", numberStrings);
-        String key = "lottery:schedule:" + issue;
+        String key = REDIS_LOTTERY_KEY_PREFIX + issue;
         redisTemplate.opsForHash().put(key, openid, numbersData);
         log.info("为用户 {} 创建了期号 {} 的彩票预约任务。", openid, issue);
     }
@@ -89,30 +101,26 @@ public class LotteryService {
         return "获取最新一期彩票信息失败";
     }
 
-    // ===================================================================================
-    // 私有辅助方法
-    // ===================================================================================
+    // ================================ 私有辅助方法 ================================
+
+    private String determineNotificationTitle(String notificationContent) {
+        boolean anyWins = notificationContent.contains("等奖");
+        return anyWins ? "🎉恭喜您中奖啦！" : "🤷‍♂️本次未中奖";
+    }
 
     private LotteryResult fetchLatestLotteryResult() {
-        Request request = new Request.Builder()
-                .url("http://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=1")
-                .header("User-Agent", "Apifox/1.0.0 (https://apifox.com)")
-                .header("Accept", "*/*")
-                .header("Host", "www.cwl.gov.cn")
-                .header("Connection", "keep-alive")
-                .header("Referer", "http://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=1")
-                .header("Cookie", "HMF_CI=5cabd3da5bbc427669409d1929b5ee59021c4775f570587b9e89e18c0830e53217873d7569ce54e50e7305343c3c44eb148db4b9935ce742568ba6e29c0c84a214")
-                .build();
+        Request request = buildLotteryRequest();
 
         try (Response response = HTTP_CLIENT.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 log.error("请求彩票接口失败: {}", response);
                 return null;
             }
+            
             String responseStr = response.body().string();
             LotteryResponse lotteryResponse = JsonUtils.fromJson(responseStr, LotteryResponse.class);
 
-            if (lotteryResponse != null && lotteryResponse.getState() == 0 && !CollectionUtils.isEmpty(lotteryResponse.getResult())) {
+            if (isValidLotteryResponse(lotteryResponse)) {
                 return lotteryResponse.getResult().get(0);
             }
         } catch (Exception e) {
@@ -121,14 +129,32 @@ public class LotteryService {
         return null;
     }
 
+    private Request buildLotteryRequest() {
+        return new Request.Builder()
+                .url(LOTTERY_RESULT_URL)
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "*/*")
+                .header("Host", "www.cwl.gov.cn")
+                .header("Connection", "keep-alive")
+                .header("Referer", LOTTERY_RESULT_URL)
+                .header("Cookie", "HMF_CI=5cabd3da5bbc427669409d1929b5ee59021c4775f570587b9e89e18c0830e53217873d7569ce54e50e7305343c3c44eb148db4b9935ce742568ba6e29c0c84a214")
+                .build();
+    }
+
+    private boolean isValidLotteryResponse(LotteryResponse lotteryResponse) {
+        return lotteryResponse != null && 
+               lotteryResponse.getState() == 0 && 
+               !CollectionUtils.isEmpty(lotteryResponse.getResult());
+    }
+
     private String buildConsolidatedNotification(List<String> numberStrings, LotteryResult winningNumbers) {
         StringBuilder resultDetails = new StringBuilder();
-        Set<Integer> winningRed = Arrays.stream(winningNumbers.getRed().split(",")).map(Integer::parseInt).collect(Collectors.toSet());
+        Set<Integer> winningRed = parseWinningNumbers(winningNumbers.getRed());
         int winningBlue = Integer.parseInt(winningNumbers.getBlue());
 
         for (int i = 0; i < numberStrings.size(); i++) {
             String numberString = numberStrings.get(i);
-            String formattedNumber = numberString.replace(" ", ",").replace("-", "+");
+            String formattedNumber = formatNumberString(numberString);
             resultDetails.append("您的号码").append(i + 1).append("（").append(formattedNumber).append("）：");
 
             Map<String, Object> numbers = validateAndParseNumbers(numberString);
@@ -137,6 +163,7 @@ public class LotteryService {
                 continue;
             }
 
+            @SuppressWarnings("unchecked")
             Set<Integer> userRed = (Set<Integer>) numbers.get("red");
             int userBlue = (int) numbers.get("blue");
 
@@ -148,16 +175,27 @@ public class LotteryService {
             resultDetails.append(prize).append(" ").append(prizeDetails).append("\n");
         }
 
-        String title = "双色球第" + winningNumbers.getCode() + "期开奖结果";
-        StringBuilder finalMessage = new StringBuilder();
-        finalMessage.append(title).append("\n\n")
-                .append("开奖日期：").append(winningNumbers.getDate()).append("\n")
-                .append("开奖号码：\n")
-                .append("红球：").append(winningNumbers.getRed()).append("\n")
-                .append("蓝球：").append(winningNumbers.getBlue()).append("\n\n")
-                .append(resultDetails.toString());
+        return buildFinalNotificationMessage(winningNumbers, resultDetails.toString());
+    }
 
-        return finalMessage.toString();
+    private Set<Integer> parseWinningNumbers(String redNumbers) {
+        return Arrays.stream(redNumbers.split(","))
+                .map(Integer::parseInt)
+                .collect(Collectors.toSet());
+    }
+
+    private String formatNumberString(String numberString) {
+        return numberString.replace(" ", ",").replace("-", "+");
+    }
+
+    private String buildFinalNotificationMessage(LotteryResult winningNumbers, String resultDetails) {
+        String title = "双色球第" + winningNumbers.getCode() + "期开奖结果";
+        return title + "\n\n" +
+                "开奖日期：" + winningNumbers.getDate() + "\n" +
+                "开奖号码：\n" +
+                "红球：" + winningNumbers.getRed() + "\n" +
+                "蓝球：" + winningNumbers.getBlue() + "\n\n" +
+                resultDetails;
     }
 
     /**
@@ -177,38 +215,33 @@ public class LotteryService {
      * 根据奖项名称从开奖结果中查找对应的奖金。
      */
     private String getPrizeDetails(String prize, LotteryResult winningNumbers) {
-        if ("未中奖".equals(prize)) return "0元";
-
-        int prizeType = -1;
-        switch (prize) {
-            case "一等奖":
-                prizeType = 1;
-                break;
-            case "二等奖":
-                prizeType = 2;
-                break;
-            case "三等奖":
-                prizeType = 3;
-                break;
-            case "四等奖":
-                prizeType = 4;
-                break;
-            case "五等奖":
-                prizeType = 5;
-                break;
-            case "六等奖":
-                prizeType = 6;
-                break;
+        if ("未中奖".equals(prize)) {
+            return "0元";
         }
 
-        if (prizeType != -1) {
-            for (PrizeGrade grade : winningNumbers.getPrizegrades()) {
-                if (grade.getType() == prizeType) {
-                    return formatMoney(grade.getTypemoney()) + "元";
-                }
+        int prizeType = getPrizeTypeByName(prize);
+        if (prizeType == -1) {
+            return "未知金额";
+        }
+
+        for (PrizeGrade grade : winningNumbers.getPrizegrades()) {
+            if (grade.getType() == prizeType) {
+                return formatMoney(grade.getTypemoney()) + "元";
             }
         }
         return "未知金额";
+    }
+
+    private int getPrizeTypeByName(String prize) {
+        switch (prize) {
+            case "一等奖": return 1;
+            case "二等奖": return 2;
+            case "三等奖": return 3;
+            case "四等奖": return 4;
+            case "五等奖": return 5;
+            case "六等奖": return 6;
+            default: return -1;
+        }
     }
 
     /**
@@ -222,10 +255,12 @@ public class LotteryService {
                     .collect(Collectors.toSet());
             int blueBall = Integer.parseInt(parts[1]);
 
-            if (redBalls.size() != 6 || redBalls.stream().anyMatch(n -> n < 1 || n > 33))
+            if (redBalls.size() != 6 || redBalls.stream().anyMatch(n -> n < 1 || n > 33)) {
                 throw new IllegalArgumentException("红球规则错误");
-            if (blueBall < 1 || blueBall > 16)
+            }
+            if (blueBall < 1 || blueBall > 16) {
                 throw new IllegalArgumentException("蓝球规则错误");
+            }
 
             Map<String, Object> parsed = new HashMap<>();
             parsed.put("red", redBalls);
@@ -241,15 +276,26 @@ public class LotteryService {
      * 发送 Bark 通知。
      */
     private void sendBarkNotification(String title, String content) {
-        if (barkKey == null || "your_bark_key_here".equals(barkKey) || barkKey.trim().isEmpty()) {
+        if (!isValidBarkKey()) {
             return;
         }
+        
         try {
             String url = String.format(BARK_URL_TEMPLATE, barkKey);
-            HttpUtil.createGet(url).form("title", title).form("body", content).form("group", "双色球开奖").execute();
+            HttpUtil.createGet(url)
+                .form("title", title)
+                .form("body", content)
+                .form("group", "双色球开奖")
+                .execute();
         } catch (Exception e) {
             log.error("Bark 通知发送失败", e);
         }
+    }
+
+    private boolean isValidBarkKey() {
+        return barkKey != null && 
+               !INVALID_BARK_KEY.equals(barkKey) && 
+               !barkKey.trim().isEmpty();
     }
 
     /**
@@ -264,8 +310,11 @@ public class LotteryService {
                 .append("💰 本期销量: ").append(formatMoney(result.getSales())).append(" 元\n")
                 .append("累计奖池: ").append(formatMoney(result.getPoolmoney())).append(" 元\n\n")
                 .append("--- 中奖详情 ---\n");
+        
         for (PrizeGrade prize : result.getPrizegrades()) {
-            if (prize.getTypenum() == null || prize.getTypenum().isEmpty()) continue;
+            if (prize.getTypenum() == null || prize.getTypenum().isEmpty()) {
+                continue;
+            }
             sb.append(getPrizeTypeName(prize.getType())).append(": ")
                     .append(prize.getTypenum()).append(" 注, ")
                     .append("每注 ").append(formatMoney(prize.getTypemoney())).append(" 元\n");
@@ -277,22 +326,7 @@ public class LotteryService {
      * 根据奖项类型ID获取奖项名称。
      */
     private String getPrizeTypeName(int type) {
-        switch (type) {
-            case 1:
-                return "一等奖";
-            case 2:
-                return "二等奖";
-            case 3:
-                return "三等奖";
-            case 4:
-                return "四等奖";
-            case 5:
-                return "五等奖";
-            case 6:
-                return "六等奖";
-            default:
-                return "其他奖";
-        }
+        return PRIZE_TYPE_NAMES.getOrDefault(type, "其他奖");
     }
 
     /**

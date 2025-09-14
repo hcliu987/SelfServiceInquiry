@@ -1,36 +1,48 @@
 package com.hc.wx.mp.service;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import cn.hutool.core.util.StrUtil;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.hc.wx.mp.config.ApiConfig;
 import com.hc.wx.mp.entity.TokenResponse;
 import com.hc.wx.mp.utils.JsonUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import javax.net.ssl.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.security.cert.X509Certificate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Scanner;
+import java.util.*;
 import java.util.concurrent.*;
-import java.util.zip.GZIPInputStream;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.GZIPInputStream;
 
 @Service
 @Slf4j
 public class SearchService {
 
+    // ================================ 常量定义 ================================
+    /** 请求超时时间（毫秒） */
+    private static final int TIMEOUT_MILLIS = 5000;
+    /** 最大重试次数 */
+    private static final int MAX_RETRY_TIMES = 3;
+    /** 缓存结果的时间（分钟） */
+    private static final int CACHE_MINUTES = 10;
+    /** 重试间隔基础时间（毫秒） */
+    private static final int RETRY_BASE_DELAY = 500;
+
+    // ================================ 成员变量 ================================
+    private final ApiConfig apiConfig;
+    private final ExecutorService executorService;
+    private final Map<String, CacheEntry> searchCache = new ConcurrentHashMap<>();
+
+    // ================================ 内部类 ================================
     @JsonIgnoreProperties(ignoreUnknown = true)
     static class SearchResult {
         private List<AnswerItem> list;
@@ -39,14 +51,62 @@ public class SearchService {
     }
 
     /**
+     * Makifx 搜索响应数据类
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class MakifxResponse {
+        private int code;
+        private String message;
+        private MakifxData data;
+        
+        public int getCode() { return code; }
+        public void setCode(int code) { this.code = code; }
+        public String getMessage() { return message; }
+        public void setMessage(String message) { this.message = message; }
+        public MakifxData getData() { return data; }
+        public void setData(MakifxData data) { this.data = data; }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class MakifxData {
+        private int total;
+        private Map<String, List<MakifxItem>> merged_by_type;
+        
+        public int getTotal() { return total; }
+        public void setTotal(int total) { this.total = total; }
+        public Map<String, List<MakifxItem>> getMerged_by_type() { return merged_by_type; }
+        public void setMerged_by_type(Map<String, List<MakifxItem>> merged_by_type) { this.merged_by_type = merged_by_type; }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class MakifxItem {
+        private String url;
+        private String password;
+        private String note;
+        private String datetime;
+        private String source;
+        private List<String> images;
+        
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
+        public String getPassword() { return password; }
+        public void setPassword(String password) { this.password = password; }
+        public String getNote() { return note; }
+        public void setNote(String note) { this.note = note; }
+        public String getDatetime() { return datetime; }
+        public void setDatetime(String datetime) { this.datetime = datetime; }
+        public String getSource() { return source; }
+        public void setSource(String source) { this.source = source; }
+        public List<String> getImages() { return images; }
+        public void setImages(List<String> images) { this.images = images; }
+    }
+
+    /**
      * 答案项数据类，用于映射JSON响应中的list数组元素
-     * 包含answer和question字段，符合API响应格式
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     static class AnswerItem {
-        /** 答案内容，通常包含链接和提取码等信息 */
         private String answer;
-        /** 问题标题，用作展示名称 */
         private String question;
         
         public String getAnswer() { return answer; }
@@ -54,24 +114,51 @@ public class SearchService {
         public String getQuestion() { return question; }
         public void setQuestion(String question) { this.question = question; }
     }
-    private final ApiConfig apiConfig;
-    private final ExecutorService executorService;
-    
-    /** 请求超时时间（毫秒）- 优化：增加超时时间提高成功率 */
-    private static final int TIMEOUT_MILLIS = 5000;
-    
-    /** 最大重试次数 - 新增：提高请求可靠性 */
-    private static final int MAX_RETRY_TIMES = 3;
-    
-    /** 缓存结果的时间（分钟）- 新增：避免频繁请求相同内容 */
-    private static final int CACHE_MINUTES = 10;
-    
-    /** 简单的内存缓存 - 优化：减少重复搜索 */
-    private final Map<String, CacheEntry> searchCache = new ConcurrentHashMap<>();
 
+    /**
+     * 结果项数据类，用于内部数据处理和格式化
+     */
+    private static class ResultItem {
+        private String title;
+        private String content;
+        
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+        public String getContent() { return content; }
+        public void setContent(String content) { this.content = content; }
+    }
+
+    /**
+     * 缓存条目类
+     */
+    private static class CacheEntry {
+        private final String result;
+        private final LocalDateTime expireTime;
+        
+        public CacheEntry(String result) {
+            this.result = result;
+            this.expireTime = LocalDateTime.now().plusMinutes(CACHE_MINUTES);
+        }
+        
+        public boolean isExpired() {
+            return LocalDateTime.now().isAfter(expireTime);
+        }
+        
+        public String getResult() {
+            return result;
+        }
+    }
+
+    // ================================ 构造函数 ================================
     public SearchService(ApiConfig apiConfig) {
         this.apiConfig = apiConfig;
-        this.executorService = new ThreadPoolExecutor(
+        this.executorService = createOptimizedThreadPool();
+        // 初始化SSL上下文，信任所有证书（仅用于开发和测试）
+        initSSLContext();
+    }
+
+    private ThreadPoolExecutor createOptimizedThreadPool() {
+        return new ThreadPoolExecutor(
             apiConfig.getThreadPool().getCoreSize(),
             apiConfig.getThreadPool().getMaxSize(),
             apiConfig.getThreadPool().getKeepAliveSeconds(),
@@ -80,98 +167,267 @@ public class SearchService {
             new ThreadPoolExecutor.CallerRunsPolicy()
         );
     }
+    
+    /**
+     * 初始化SSL上下文，信任所有证书
+     * 注意：这种做法仅适用于开发和测试环境
+     * 生产环境应该使用正确的证书验证
+     */
+    private void initSSLContext() {
+        try {
+            // 创建信任所有证书的TrustManager
+            TrustManager[] trustAllCerts = new TrustManager[] {
+                new X509TrustManager() {
+                    public X509Certificate[] getAcceptedIssuers() {
+                        return null;
+                    }
+                    public void checkClientTrusted(X509Certificate[] certs, String authType) {
+                        // 不做任何检查
+                    }
+                    public void checkServerTrusted(X509Certificate[] certs, String authType) {
+                        // 不做任何检查
+                    }
+                }
+            };
+            
+            // 创建SSL上下文
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+            
+            // 设置默认的SSL Socket Factory
+            HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
+            
+            // 设置默认的Hostname Verifier
+            HttpsURLConnection.setDefaultHostnameVerifier(new HostnameVerifier() {
+                public boolean verify(String hostname, SSLSession session) {
+                    return true; // 信任所有hostname
+                }
+            });
+            
+            log.info("SSL上下文初始化完成，已设置信任所有证书");
+            
+        } catch (Exception e) {
+            log.error("SSL上下文初始化失败", e);
+        }
+    }
 
-    // ===================================================================================
-    // 主入口方法
-    // ===================================================================================
+    // ================================ 主入口方法 ================================
 
     /**
      * m.kkqws.com 的主搜索入口。
      * 并发调用其核心API，并返回第一个有效结果。
      */
     public String searchAndMerge(String text) {
-        List<CompletableFuture<String>> futures = new ArrayList<>();
-        futures.add(createSearchFuture(() -> getJuziKkqws(text), "getJuziKkqws"));
-        futures.add(createSearchFuture(() -> getXiaoyuKkqws(text), "getXiaoyuKkqws"));
-        futures.add(createSearchFuture(() -> searchKkqws(text), "searchKkqws"));
-        futures.add(createSearchFuture(() -> getDyfxKkqws(text), "getDyfxKkqws"));
+        List<CompletableFuture<String>> futures = createKkqwsSearchFutures(text);
         String jsonResponse = getFirstValidResult(futures, "searchAndMerge");
 
         if (StrUtil.isBlank(jsonResponse)) {
             return "";
         }
 
-        try {
-            SearchResult result = JsonUtils.fromJson(jsonResponse, SearchResult.class);
-            if (result == null || result.getList() == null || result.getList().isEmpty()) {
-                return "未找到相关内容。";
-            }
-            
-            StringBuilder finalResult = new StringBuilder();
-            finalResult.append(text).append(":\n");
-
-            List<String> allLinks = new ArrayList<>();
-            for (AnswerItem item : result.getList()) {
-                if (StrUtil.isNotBlank(item.getAnswer())) {
-                    Pattern linkPattern = Pattern.compile("https?:\\/\\/[^\\s\"'<>]+");
-                    Matcher matcher = linkPattern.matcher(item.getAnswer());
-                    while (matcher.find()) {
-                        allLinks.add(matcher.group());
-                    }
-                }
-            }
-            finalResult.append(String.join("\n", allLinks));
-            System.out.println(finalResult.toString());
-            return finalResult.toString();
-
-        } catch (Exception e) {
-            log.error("格式化搜索结果失败, JSON: {}", jsonResponse, e);
-            return jsonResponse;
-        }
+        return formatKkqwsSearchResult(jsonResponse, text);
     }
 
     /**
-     * 多线程获取数据并合并，处理JSON数据提取answer作为链接内容，question作为展示名称
-     * 
-     * 功能说明：
-     * 1. 使用固定大小的线程池进行多线程数据获取
-     * 2. 收集所有线程的执行结果，保证数据完整性
-     * 3. 解析JSON响应提取question和answer字段
-     * 4. 按照【标题】\n内容\n\n的格式输出
-     * 
-     * 遵循JSON数据处理规范：
-     * - 仅提取answer字段作为链接展示
-     * - question字段作为展示标题
-     * - 格式化输出为【标题】\n内容\n\n的形式
-     * 
-     * @param text 搜索关键词
-     * @return 格式化后的搜索结果字符串，包含所有数据源的结果
+     * 多线程获取数据并合并，处理JSON数据提取answer作为链接内容，
+     * question作为展示名称，按照【标题】\n内容\n\n的格式输出
      */
     public String searchAndMergeRaw(String text) {
         log.info("开始多线程数据获取并处理，查询内容: {}", text);
         
-        // 优化：检查缓存
+        // 检查缓存
+        String cachedResult = getCachedResult(text);
+        if (cachedResult != null) {
+            return cachedResult;
+        }
+        
+        // 清理过期缓存
+        cleanExpiredCache();
+        
+        // 执行搜索并收集结果
+        List<String> allResults = executeSearchAndCollectResults(text);
+        
+        if (allResults.isEmpty()) {
+            log.warn("未获取到任何有效数据");
+            return "";
+        }
+        
+        // 处理结果并缓存
+        String finalResult = processAndFormatResults(allResults, text);
+        cacheResult(text, finalResult);
+        
+        return finalResult;
+    }
+
+    /**
+     * uukk6.cn 的主搜索入口。
+     * 自动获取Token，然后并发调用所有API，并返回第一个有效结果。
+     */
+    public String searchUukkAll(String name) {
+        try {
+            TokenResponse tokenResponse = getToken();
+            if (tokenResponse == null || StrUtil.isEmpty(tokenResponse.getToken())) {
+                log.error("获取Token失败，无法继续搜索。");
+                return "";
+            }
+            String token = tokenResponse.getToken();
+            
+            List<CompletableFuture<String>> futures = createUukkSearchFutures(name, token);
+            return getFirstValidResult(futures, "searchUukkAll");
+        } catch (Exception e) {
+            log.error("searchUukkAll 执行过程中发生异常", e);
+            return "";
+        }
+    }
+
+    /**
+     * 根据名字搜索 Makifx 资源
+     * 调用 https://sou.makifx.com API，返回格式化的搜索结果
+     * 
+     * @param keyword 搜索关键词
+     * @return 格式化的搜索结果，只显示链接
+     */
+    public String searchMakifx(String keyword) {
+        if (StrUtil.isBlank(keyword)) {
+            return "搜索关键词不能为空";
+        }
+        
+        // 详细记录输入参数
+        log.info("开始搜索 Makifx 资源，原始关键词: [{}], 字符长度: {}, 字符编码检查: {}", 
+                keyword, keyword.length(), java.util.Arrays.toString(keyword.toCharArray()));
+        
+        // 检查缓存
+        String cacheKey = "makifx_" + keyword.hashCode();
+        CacheEntry cached = searchCache.get(cacheKey);
+        if (cached != null && !cached.isExpired()) {
+            log.info("Makifx 搜索命中缓存: {}", keyword);
+            return cached.getResult();
+        }
+        
+        try {
+            // 调用 Makifx API
+            String jsonResponse = sendMakifxRequest(keyword);
+            if (StrUtil.isBlank(jsonResponse)) {
+                log.warn("Makifx API 返回空响应，关键词: {}", keyword);
+                return "未获取到搜索结果";
+            }
+            
+            // 解析并格式化结果
+            String formattedResult = formatMakifxResult(jsonResponse, keyword);
+            
+            // 只有成功的结果才缓存
+            if (StrUtil.isNotBlank(formattedResult) && 
+                !formattedResult.contains("未找到") && 
+                !formattedResult.contains("失败") && 
+                !formattedResult.contains("异常") &&
+                !formattedResult.contains("不可用")) {
+                searchCache.put(cacheKey, new CacheEntry(formattedResult));
+                log.info("Makifx 搜索结果已缓存，关键词: {}", keyword);
+            }
+            
+            return formattedResult;
+            
+        } catch (Exception e) {
+            log.error("Makifx 搜索失败，关键词: {}, 错误: {}", keyword, e.getMessage(), e);
+            return "搜索过程中发生错误: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 调试方法：验证URL编码过程
+     * @param keyword 输入关键词
+     * @return 编码信息
+     */
+    public String debugUrlEncoding(String keyword) {
+        try {
+            StringBuilder debug = new StringBuilder();
+            debug.append(String.format("输入关键词: [%s]\n", keyword));
+            debug.append(String.format("字符长度: %d\n", keyword.length()));
+            debug.append(String.format("字符数组: %s\n", java.util.Arrays.toString(keyword.toCharArray())));
+            
+            String encoded = URLEncoder.encode(keyword, "UTF-8");
+            debug.append(String.format("URL编码结果: %s\n", encoded));
+            
+            String decoded = java.net.URLDecoder.decode(encoded, "UTF-8");
+            debug.append(String.format("解码验证: [%s]\n", decoded));
+            debug.append(String.format("编码正确性: %s\n", keyword.equals(decoded)));
+            
+            // 检查是否与"天然子结构"的编码相同
+            String naturalStructure = "天然子结构";
+            String naturalEncoded = URLEncoder.encode(naturalStructure, "UTF-8");
+            debug.append(String.format("天然子结构编码: %s\n", naturalEncoded));
+            debug.append(String.format("是否与天然子结构编码相同: %s\n", encoded.equals(naturalEncoded)));
+            
+            return debug.toString();
+        } catch (Exception e) {
+            return "调试失败: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * 简化的Makifx搜索方法，用于调试
+     */
+    public String debugMakifxSearch(String keyword) {
+        log.info("=== 开始Makifx搜索调试 ===");
+        log.info("调试 - 接收到的关键词: [{}]", keyword);
+        
+        String debugInfo = debugUrlEncoding(keyword);
+        log.info("URL编码调试信息:\n{}", debugInfo);
+        
+        try {
+            String result = sendMakifxRequest(keyword);
+            log.info("API调用完成，结果长度: {} 字符", result.length());
+            return String.format("调试信息：\n%s\n\nAPI调用结果长度: %d 字符", debugInfo, result.length());
+        } catch (Exception e) {
+            log.error("调试搜索失败: {}", e.getMessage(), e);
+            return String.format("调试信息：\n%s\n\n调试搜索失败: %s", debugInfo, e.getMessage());
+        }
+    }
+
+    private String getCachedResult(String text) {
         String cacheKey = "search_" + text.hashCode();
         CacheEntry cached = searchCache.get(cacheKey);
         if (cached != null && !cached.isExpired()) {
             log.info("命中缓存，直接返回结果: {}", text);
             return cached.getResult();
         }
-        
-        // 清理过期缓存
+        return null;
+    }
+
+    private void cleanExpiredCache() {
         searchCache.entrySet().removeIf(entry -> entry.getValue().isExpired());
-        
+    }
+
+    private void cacheResult(String text, String result) {
+        if (!result.isEmpty()) {
+            String cacheKey = "search_" + text.hashCode();
+            searchCache.put(cacheKey, new CacheEntry(result));
+            log.debug("结果已存储到缓存，cacheKey: {}", cacheKey);
+        }
+    }
+
+    // ================================ 搜索执行方法 ================================
+
+    private List<CompletableFuture<String>> createKkqwsSearchFutures(String text) {
         List<CompletableFuture<String>> futures = new ArrayList<>();
         futures.add(createSearchFuture(() -> getJuziKkqws(text), "getJuziKkqws"));
         futures.add(createSearchFuture(() -> getXiaoyuKkqws(text), "getXiaoyuKkqws"));
         futures.add(createSearchFuture(() -> searchKkqws(text), "searchKkqws"));
         futures.add(createSearchFuture(() -> getDyfxKkqws(text), "getDyfxKkqws"));
-        
-        // 收集所有结果
+        return futures;
+    }
+
+    private List<CompletableFuture<String>> createUukkSearchFutures(String name, String token) {
+        List<CompletableFuture<String>> futures = new ArrayList<>();
+        futures.add(createSearchFuture(() -> getDyfxUukk(name, token), "getDyfxUukk"));
+        futures.add(createSearchFuture(() -> getGGangUukk(name, token), "getGGangUukk"));
+        return futures;
+    }
+
+    private List<String> executeSearchAndCollectResults(String text) {
+        List<CompletableFuture<String>> futures = createKkqwsSearchFutures(text);
         List<String> allResults = new ArrayList<>();
-        long startTime = System.currentTimeMillis();
         
-        // 优化：使用CompletableFuture.allOf等待所有任务完成
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .get(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
@@ -196,68 +452,108 @@ public class SearchService {
             }
         }
         
-        // 记录汇总信息
         log.info("多线程数据获取完成，共收集到 {} 个有效结果", allResults.size());
-        
-        if (allResults.isEmpty()) {
-            log.warn("未获取到任何有效数据");
-            return "";
+        return allResults;
+    }
+    // ================================ 结果处理方法 ================================
+
+    private String formatKkqwsSearchResult(String jsonResponse, String text) {
+        try {
+            SearchResult result = JsonUtils.fromJson(jsonResponse, SearchResult.class);
+            if (result == null || result.getList() == null || result.getList().isEmpty()) {
+                return "未找到相关内容。";
+            }
+            
+            StringBuilder finalResult = new StringBuilder();
+            finalResult.append(text).append(":\n");
+
+            List<String> allLinks = extractLinksFromAnswers(result.getList());
+            finalResult.append(String.join("\n", allLinks));
+            System.out.println(finalResult.toString());
+            return finalResult.toString();
+
+        } catch (Exception e) {
+            log.error("格式化搜索结果失败, JSON: {}", jsonResponse, e);
+            return jsonResponse;
         }
+    }
+
+    private List<String> extractLinksFromAnswers(List<AnswerItem> answerItems) {
+        List<String> allLinks = new ArrayList<>();
+        Pattern linkPattern = Pattern.compile("https?:\\/\\/[^\\s\"'<>]+");
         
-        // 处理JSON数据，提取question和answer字段
-        // 新增：支持HTML格式数据解析，自动识别数据类型
-        // 遵循HTML解析输出规范：格式化输出为【标题】\n内容\n\n的形式
-        StringBuilder finalResult = new StringBuilder();
+        for (AnswerItem item : answerItems) {
+            if (StrUtil.isNotBlank(item.getAnswer())) {
+                Matcher matcher = linkPattern.matcher(item.getAnswer());
+                while (matcher.find()) {
+                    allLinks.add(matcher.group());
+                }
+            }
+        }
+        return allLinks;
+    }
+
+    private String processAndFormatResults(List<String> allResults, String text) {
         List<ResultItem> processedItems = new ArrayList<>();
         
         for (String jsonResult : allResults) {
+            processedItems.addAll(parseJsonToResultItems(jsonResult, text));
+        }
+        
+        if (processedItems.isEmpty()) {
+            log.warn("未能从 JSON 数据中提取到有效的内容项");
+            return "未找到相关内容";
+        }
+        
+        return formatResultItems(processedItems);
+    }
+
+    private List<ResultItem> parseJsonToResultItems(String jsonResult, String defaultTitle) {
+        List<ResultItem> items = new ArrayList<>();
+        
+        try {
+            SearchResult searchResult = JsonUtils.fromJson(jsonResult, SearchResult.class);
+            if (searchResult != null && searchResult.getList() != null) {
+                items.addAll(convertAnswerItemsToResultItems(searchResult.getList(), defaultTitle));
+            } else {
+                items.addAll(parseHtmlContent(jsonResult, defaultTitle));
+            }
+        } catch (Exception e) {
+            log.error("解析 JSON 数据失败，尝试 HTML 解析: {}", jsonResult, e);
             try {
-                // 优化：先尝试作为JSON解析，保持向后兼容性
-                // 符合JSON数据处理规范：提取answer字段作为链接展示，question字段作为展示标题
-                SearchResult searchResult = JsonUtils.fromJson(jsonResult, SearchResult.class);
-                if (searchResult != null && searchResult.getList() != null) {
-                    // JSON格式数据处理：按照原有逻辑处理AnswerItem列表
-                    for (AnswerItem item : searchResult.getList()) {
-                        if (StrUtil.isNotBlank(item.getAnswer())) {
-                            ResultItem resultItem = new ResultItem();
-                            // 使用question作为展示名称，如果没有question则使用搜索关键词
-                            resultItem.setTitle(StrUtil.isNotBlank(item.getQuestion()) ? item.getQuestion() : text);
-                            resultItem.setContent(item.getAnswer());
-                            processedItems.add(resultItem);
-                        }
-                    }
-                } else {
-                    // 优化：如果JSON解析失败，尝试作为HTML格式处理
-                    // 新增功能：支持HTML格式数据的解析和链接提取
-                    List<ResultItem> htmlItems = parseHtmlContent(jsonResult, text);
-                    processedItems.addAll(htmlItems);
-                }
-            } catch (Exception e) {
-                log.error("解析JSON数据失败，尝试HTML解析: {}", jsonResult, e);
-                // 异常处理：多层次容错机制，确保数据不丢失
-                try {
-                    // 第二层兜底：HTML格式解析
-                    List<ResultItem> htmlItems = parseHtmlContent(jsonResult, text);
-                    processedItems.addAll(htmlItems);
-                } catch (Exception htmlE) {
-                    log.error("HTML解析也失败: {}", jsonResult, htmlE);
-                    // 最后兜底：简单文本处理，避免数据完全丢失
-                    if (jsonResult.contains("answer") || jsonResult.contains("href")) {
-                        ResultItem resultItem = new ResultItem();
-                        resultItem.setTitle(text);
-                        resultItem.setContent(jsonResult);
-                        processedItems.add(resultItem);
-                    }
+                items.addAll(parseHtmlContent(jsonResult, defaultTitle));
+            } catch (Exception htmlE) {
+                log.error("HTML 解析也失败: {}", jsonResult, htmlE);
+                if (jsonResult.contains("answer") || jsonResult.contains("href")) {
+                    ResultItem resultItem = new ResultItem();
+                    resultItem.setTitle(defaultTitle);
+                    resultItem.setContent(jsonResult);
+                    items.add(resultItem);
                 }
             }
         }
         
-        if (processedItems.isEmpty()) {
-            log.warn("未能从JSON数据中提取到有效的内容项");
-            return "未找到相关内容";
+        return items;
+    }
+
+    private List<ResultItem> convertAnswerItemsToResultItems(List<AnswerItem> answerItems, String defaultTitle) {
+        List<ResultItem> items = new ArrayList<>();
+        
+        for (AnswerItem item : answerItems) {
+            if (StrUtil.isNotBlank(item.getAnswer())) {
+                ResultItem resultItem = new ResultItem();
+                resultItem.setTitle(StrUtil.isNotBlank(item.getQuestion()) ? item.getQuestion() : defaultTitle);
+                resultItem.setContent(item.getAnswer());
+                items.add(resultItem);
+            }
         }
         
-        // 格式化输出
+        return items;
+    }
+
+    private String formatResultItems(List<ResultItem> processedItems) {
+        StringBuilder finalResult = new StringBuilder();
+        
         for (ResultItem item : processedItems) {
             finalResult.append("【").append(item.getTitle()).append("】\n");
             finalResult.append(item.getContent()).append("\n\n");
@@ -267,51 +563,11 @@ public class SearchService {
         log.info("处理完成，共提取 {} 个内容项，总长度: {} 字符", processedItems.size(), result.length());
         log.info("最终处理结果: {}", result);
         
-        // 优化：存储到缓存
-        if (!result.isEmpty()) {
-            searchCache.put(cacheKey, new CacheEntry(result));
-            log.debug("结果已存储到缓存，cacheKey: {}", cacheKey);
-        }
-        
         return result;
     }
     
     /**
-     * 解析HTML格式的内容，提取标题和href链接
-     * 
-     * <p>支持的HTML格式示例：</p>
-     * <pre>
-     * 【[英雄崛起 The Awakening of Hero][2020][科幻][中国]】
-     * 视频：&lt;a href="https://pan.baidu.com/s/1Lks_VmzXtn3NZ_MG3i3LlQ"&gt;百度云盘&lt;/a&gt;&amp;nbsp; &amp;nbsp; 提取码：1234
-     * </pre>
-     * 
-     * <p>解析后的输出格式：</p>
-     * <pre>
-     * 【[英雄崛起 The Awakening of Hero][2020][科幻][中国]】
-     * 视频：链接: https://pan.baidu.com/s/1Lks_VmzXtn3NZ_MG3i3LlQ 提取码：1234
-     * </pre>
-     * 
-     * <p>核心功能：</p>
-     * <ul>
-     *   <li>使用正则表达式匹配【标题】格式</li>
-     *   <li>提取&lt;a href="..."&gt;标签中的链接地址</li>
-     *   <li>保留提取码等关键信息</li>
-     *   <li>清理HTML标签和格式化输出</li>
-     * </ul>
-     * 
-     * <p>遵循规范：</p>
-     * <ul>
-     *   <li>遵循HTML解析输出规范：格式化输出为【标题】\n内容\n\n的形式</li>
-     *   <li>符合页面展示与HTML解析适配规范</li>
-     *   <li>链接独立保存为'链接: URL'的格式</li>
-     * </ul>
-     * 
-     * @param htmlContent HTML内容字符串，包含标题和链接信息
-     * @param defaultTitle 默认标题，当解析不到标题时使用
-     * @return 解析后的结果列表，每个元素包含标题和处理后的内容
-     * @throws IllegalArgumentException 当htmlContent为空或格式不正确时
-     * @since 1.0.0
-     * @see #processContentWithLinks(String) 链接处理方法
+     * 解析HTML内容，提取标题和href链接
      */
     private List<ResultItem> parseHtmlContent(String htmlContent, String defaultTitle) {
         List<ResultItem> items = new ArrayList<>();
@@ -322,30 +578,19 @@ public class SearchService {
         
         log.info("开始解析HTML内容，长度: {} 字符", htmlContent.length());
         
-        // 正则表达式定义：用于匹配不同的HTML元素和模式
-        // 标题模式：匹配【任意内容】的格式，非贪婪匹配
         Pattern titlePattern = Pattern.compile("【([^】]+)】");
-        // 链接模式：匹配href属性，支持各种引号和空格情况
-        Pattern hrefPattern = Pattern.compile("<a\\s+href=\"([^\"]+)\"");
-        // 提取码模式：匹配中英文冒号和数字字母组合
-        Pattern extractCodePattern = Pattern.compile("提取码[：:]\\s*(\\w+)");
-        
-        // 分行处理：按行解析HTML内容，支持Windows/Unix/Mac的换行符
         String[] lines = htmlContent.split("\\r?\\n");
-        String currentTitle = defaultTitle;  // 当前正在处理的标题
-        StringBuilder currentContent = new StringBuilder();  // 当前标题下的内容累加器
+        String currentTitle = defaultTitle;
+        StringBuilder currentContent = new StringBuilder();
         
-        // 逐行处理：对每一行进行分类处理（标题行 vs 内容行）
         for (String line : lines) {
-            line = line.trim();  // 去除行首尾空格，提高匹配准确性
+            line = line.trim();
             if (line.isEmpty()) {
-                continue;  // 跳过空行，避免干扰解析逻辑
+                continue;
             }
             
-            // 标题检测：检查当前行是否为标题格式
             Matcher titleMatcher = titlePattern.matcher(line);
             if (titleMatcher.find()) {
-                // 处理上一个标题的内容：在开始新标题之前，先保存之前的结果
                 if (currentContent.length() > 0) {
                     String content = processContentWithLinks(currentContent.toString());
                     if (StrUtil.isNotBlank(content)) {
@@ -357,20 +602,17 @@ public class SearchService {
                     }
                 }
                 
-                // 新标题处理：提取标题内容并重置内容累加器
-                currentTitle = titleMatcher.group(1);  // 提取捕获组中的标题内容
-                currentContent = new StringBuilder();   // 重置为新标题准备内容累加
+                currentTitle = titleMatcher.group(1);
+                currentContent = new StringBuilder();
                 log.debug("找到标题: {}", currentTitle);
             } else {
-                // 内容行处理：非标题行，将其作为当前标题的内容进行累加
                 if (currentContent.length() > 0) {
-                    currentContent.append("\n");  // 在内容行之间添加换行符
+                    currentContent.append("\n");
                 }
                 currentContent.append(line);
             }
         }
         
-        // 处理最后一个内容块
         if (currentContent.length() > 0) {
             String content = processContentWithLinks(currentContent.toString());
             if (StrUtil.isNotBlank(content)) {
@@ -385,36 +627,9 @@ public class SearchService {
         log.info("HTML解析完成，共提取 {} 个结果项", items.size());
         return items;
     }
-    
+
     /**
-     * 专门提取内容中的href链接，删除其他所有内容
-     * 
-     * <p>核心功能：</p>
-     * <ul>
-     *   <li>使用正则表达式匹配&lt;a href="..."&gt;...&lt;/a&gt;模式</li>
-     *   <li>仅提取href属性中的真实链接地址</li>
-     *   <li>忽略链接显示文本和其他所有内容</li>
-     *   <li>每个链接独立一行输出</li>
-     * </ul>
-     * 
-     * <p>转换示例：</p>
-     * <pre>
-     * 输入: 视频：&lt;a href="https://pan.baidu.com/s/123"&gt;百度云盘&lt;/a&gt;&amp;nbsp; &amp;nbsp; 提取码：1234
-     * 输出: https://pan.baidu.com/s/123
-     * </pre>
-     * 
-     * <p>正则表达式说明：</p>
-     * <ul>
-     *   <li>&lt;a[^&gt;]*href=\"([^\"]+)\"[^&gt;]*&gt; - 匹配href属性</li>
-     *   <li>捕获组1：href属性值（链接地址）</li>
-     *   <li>忽略链接显示文本和其他HTML内容</li>
-     * </ul>
-     * 
-     * @param content 原始内容字符串，可能包含HTML标签和链接
-     * @return 仅包含提取的href链接，每个链接一行
-     * @throws IllegalArgumentException 当content为空时
-     * @since 1.0.0
-     * @see Pattern#compile(String) 正则表达式编译
+     * 提取内容中的href链接
      */
     private String processContentWithLinks(String content) {
         if (StrUtil.isBlank(content)) {
@@ -422,25 +637,16 @@ public class SearchService {
         }
         
         StringBuilder result = new StringBuilder();
-        
-        // 正则表达式定义：专门匹配href属性，忽略其他内容
-        // 模式说明：<a[^>]*href="([^"]+)"[^>]*>
-        // - <a[^>]* : 匹配<a标签和可能的其他属性
-        // - href=\"([^\"]+)\" : 捕获href属性值（不包含引号）
-        // - [^>]*> : 匹配其他属性直到>
         Pattern linkPattern = Pattern.compile("<a[^>]*href=\"([^\"]+)\"[^>]*>");
         Matcher linkMatcher = linkPattern.matcher(content);
         
-        int linkCount = 0;    // 链接计数器，用于日志记录和调试
+        int linkCount = 0;
         
-        // 循环处理：逐个匹配和提取所有href链接
         while (linkMatcher.find()) {
-            // 提取链接信息：从正则捕获组中获取href属性值
-            String hrefUrl = linkMatcher.group(1);    // 第一个捕获组：href属性值
+            String hrefUrl = linkMatcher.group(1);
             
-            // 直接输出链接：每个链接独立一行，不包含任何其他文本
             if (linkCount > 0) {
-                result.append("\n");  // 多个链接时换行分隔
+                result.append("\n");
             }
             result.append(hrefUrl);
             linkCount++;
@@ -454,108 +660,7 @@ public class SearchService {
         return extractedLinks;
     }
     
-    /**
-     * 缓存条目类 - 优化：存储搜索结果和过期时间
-     */
-    private static class CacheEntry {
-        private final String result;
-        private final LocalDateTime expireTime;
-        
-        public CacheEntry(String result) {
-            this.result = result;
-            this.expireTime = LocalDateTime.now().plusMinutes(CACHE_MINUTES);
-        }
-        
-        public boolean isExpired() {
-            return LocalDateTime.now().isAfter(expireTime);
-        }
-        
-        public String getResult() {
-            return result;
-        }
-    }
-
-    /**
-     * 结果项数据类，用于内部数据处理和格式化
-     * 将解析后的JSON数据转换为统一的结果格式
-     */
-    private static class ResultItem {
-        /** 展示标题，来自question字段或搜索关键词 */
-        private String title;
-        /** 内容信息，来自answer字段，包含链接和提取码 */
-        private String content;
-        
-        public String getTitle() { return title; }
-        public void setTitle(String title) { this.title = title; }
-        public String getContent() { return content; }
-        public void setContent(String content) { this.content = content; }
-    }
-    /**
-     * uukk6.cn 的主搜索入口。
-     * 自动获取Token，然后并发调用所有API，并返回第一个有效结果。
-     */
-    public String searchUukkAll(String name) {
-        try {
-            TokenResponse tokenResponse = getToken();
-            if (tokenResponse == null || StrUtil.isEmpty(tokenResponse.getToken())) {
-                log.error("获取Token失败，无法继续搜索。");
-                return "";
-            }
-            String token = tokenResponse.getToken();
-            
-            List<CompletableFuture<String>> futures = new ArrayList<>();
-            futures.add(createSearchFuture(() -> getDyfxUukk(name, token), "getDyfxUukk"));
-            futures.add(createSearchFuture(() -> getGGangUukk(name, token), "getGGangUukk"));
-            // ... add all other uukk6 methods
-            return getFirstValidResult(futures, "searchUukkAll");
-        } catch (Exception e) {
-            log.error("searchUukkAll 执行过程中发生异常", e);
-            return "";
-        }
-    }
-
-    // ===================================================================================
-    // API 实现 - uukk6.cn
-    // ===================================================================================
-    
-    public TokenResponse getToken() throws Exception {
-        String jsonResponse = sendUukkGetRequest("/v/api/gettoken");
-        return JsonUtils.fromJson(jsonResponse, TokenResponse.class);
-    }
-    
-    public String getDyfxUukk(String name, String token) throws Exception {
-        return sendUukkPostRequest("/v/api/getDyfx", "name=" + URLEncoder.encode(name, "UTF-8") + "&token=" + token);
-    }
-    
-    public String getGGangUukk(String name, String token) throws Exception {
-        return sendUukkPostRequest("/v/api/getGGang", "name=" + URLEncoder.encode(name, "UTF-8") + "&token=" + token);
-    }
-    // ... all other uukk6 methods here
-
-    // ===================================================================================
-    // API 实现 - m.kkqws.com
-    // ===================================================================================
-
-    public String getJuziKkqws(String text) throws Exception {
-        return sendKkqwsPostRequest(apiConfig.getJuziPath(), text);
-    }
-
-    public String getXiaoyuKkqws(String text) throws Exception {
-        return sendKkqwsPostRequest(apiConfig.getXiaoyuPath(), text);
-    }
-
-    public String searchKkqws(String text) throws Exception {
-        return sendKkqwsPostRequest(apiConfig.getSearchPath(), text);
-    }
-
-    public String getDyfxKkqws(String text) throws Exception {
-        return sendKkqwsPostRequest(apiConfig.getDyfxPath(), text);
-    }
-
-
-    // ===================================================================================
-    // 底层HTTP与并发逻辑
-    // ===================================================================================
+    // ================================ 底层HTTP与并发逻辑 ================================
 
     private String getFirstValidResult(List<CompletableFuture<String>> futures, String operationName) {
         long startTime = System.currentTimeMillis();
@@ -579,48 +684,123 @@ public class SearchService {
         log.warn("{} 所有并发任务在超时 {}ms 内均未返回有效结果。", operationName, TIMEOUT_MILLIS);
         return "";
     }
-    
-    private String sendKkqwsPostRequest(String path, String text) throws Exception {
-        URL url = new URL(apiConfig.getBaseUrl() + path);
-        HttpURLConnection httpConn = (HttpURLConnection) url.openConnection();
-        httpConn.setRequestMethod("POST");
-        httpConn.setConnectTimeout(TIMEOUT_MILLIS);
-        httpConn.setReadTimeout(TIMEOUT_MILLIS);
-        httpConn.setDoOutput(true);
-        setKkqwsHeaders(httpConn);
 
-        String postData = "name=" + URLEncoder.encode(text, "UTF-8") + "&token=" + apiConfig.getKkqwsToken();
-        try (OutputStreamWriter writer = new OutputStreamWriter(httpConn.getOutputStream())) {
-            writer.write(postData);
-            writer.flush();
+    private CompletableFuture<String> createSearchFuture(Callable<String> task, String operationName) {
+        return CompletableFuture.supplyAsync(() -> executeWithRetry(task, operationName), executorService);
+    }
+
+    private String executeWithRetry(Callable<String> request, String operationName) {
+        Exception lastException = null;
+        
+        for (int i = 0; i < MAX_RETRY_TIMES; i++) {
+            try {
+                String result = request.call();
+                if (!result.isEmpty() && !isInvalidResult(result)) {
+                    return result;
+                }
+                log.warn("{} 第 {} 次尝试获取到无效结果", operationName, i + 1);
+            } catch (Exception e) {
+                lastException = e;
+                log.warn("{} 第 {} 次尝试失败: {}", operationName, i + 1, e.getMessage());
+                
+                if (i < MAX_RETRY_TIMES - 1) {
+                    try {
+                        Thread.sleep(RETRY_BASE_DELAY * (i + 1));
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
         }
-        return handleResponse(httpConn);
+        
+        log.error("{} 经过 {} 次重试后仍然失败", operationName, MAX_RETRY_TIMES, lastException);
+        return "";
+    }
+
+    private boolean isInvalidResult(String result) {
+        return result == null || result.contains("此链接失效，请返回首页");
+    }
+    // ================================ API 实现 ================================
+
+    public TokenResponse getToken() throws Exception {
+        String jsonResponse = sendUukkGetRequest("/v/api/gettoken");
+        return JsonUtils.fromJson(jsonResponse, TokenResponse.class);
+    }
+    
+    public String getDyfxUukk(String name, String token) throws Exception {
+        return sendUukkPostRequest("/v/api/getDyfx", "name=" + URLEncoder.encode(name, "UTF-8") + "&token=" + token);
+    }
+    
+    public String getGGangUukk(String name, String token) throws Exception {
+        return sendUukkPostRequest("/v/api/getGGang", "name=" + URLEncoder.encode(name, "UTF-8") + "&token=" + token);
+    }
+
+    public String getJuziKkqws(String text) throws Exception {
+        return sendKkqwsPostRequest(apiConfig.getJuziPath(), text);
+    }
+
+    public String getXiaoyuKkqws(String text) throws Exception {
+        return sendKkqwsPostRequest(apiConfig.getXiaoyuPath(), text);
+    }
+
+    public String searchKkqws(String text) throws Exception {
+        return sendKkqwsPostRequest(apiConfig.getSearchPath(), text);
+    }
+
+    public String getDyfxKkqws(String text) throws Exception {
+        return sendKkqwsPostRequest(apiConfig.getDyfxPath(), text);
+    }
+
+    // ================================ HTTP请求方法 ================================
+
+    private String sendKkqwsPostRequest(String path, String text) throws Exception {
+        String postData = "name=" + URLEncoder.encode(text, "UTF-8") + "&token=" + apiConfig.getKkqwsToken();
+        return sendPostRequest(apiConfig.getBaseUrl() + path, postData, this::setKkqwsHeaders);
     }
     
     private String sendUukkPostRequest(String path, String postData) throws Exception {
-        URL url = new URL(apiConfig.getUukkBaseUrl() + path);
-        HttpURLConnection httpConn = (HttpURLConnection) url.openConnection();
-        httpConn.setRequestMethod("POST");
-        httpConn.setConnectTimeout(TIMEOUT_MILLIS);
-        httpConn.setReadTimeout(TIMEOUT_MILLIS);
-        httpConn.setDoOutput(true);
-        setUukkHeaders(httpConn);
-
-        try (OutputStreamWriter writer = new OutputStreamWriter(httpConn.getOutputStream())) {
-            writer.write(postData);
-            writer.flush();
-        }
-        return handleResponse(httpConn);
+        return sendPostRequest(apiConfig.getUukkBaseUrl() + path, postData, this::setUukkHeaders);
     }
     
     private String sendUukkGetRequest(String path) throws Exception {
-        URL url = new URL(apiConfig.getUukkBaseUrl() + path);
+        return sendGetRequest(apiConfig.getUukkBaseUrl() + path, this::setUukkHeaders);
+    }
+
+    private String sendPostRequest(String urlStr, String postData, HeaderSetter headerSetter) throws Exception {
+        return sendHttpRequest(urlStr, "POST", postData, headerSetter);
+    }
+
+    private String sendGetRequest(String urlStr, HeaderSetter headerSetter) throws Exception {
+        return sendHttpRequest(urlStr, "GET", null, headerSetter);
+    }
+
+    private String sendHttpRequest(String urlStr, String method, String postData, HeaderSetter headerSetter) throws Exception {
+        URL url = new URL(urlStr);
         HttpURLConnection httpConn = (HttpURLConnection) url.openConnection();
-        httpConn.setRequestMethod("GET");
+        httpConn.setRequestMethod(method);
         httpConn.setConnectTimeout(TIMEOUT_MILLIS);
         httpConn.setReadTimeout(TIMEOUT_MILLIS);
-        setUukkHeaders(httpConn);
+        
+        if ("POST".equals(method)) {
+            httpConn.setDoOutput(true);
+        }
+        
+        headerSetter.setHeaders(httpConn);
+
+        if ("POST".equals(method) && postData != null) {
+            try (OutputStreamWriter writer = new OutputStreamWriter(httpConn.getOutputStream())) {
+                writer.write(postData);
+                writer.flush();
+            }
+        }
+        
         return handleResponse(httpConn);
+    }
+
+    @FunctionalInterface
+    private interface HeaderSetter {
+        void setHeaders(HttpURLConnection connection);
     }
 
     private String handleResponse(HttpURLConnection httpConn) throws IOException {
@@ -645,62 +825,305 @@ public class SearchService {
     private void setUukkHeaders(HttpURLConnection httpConn) {
         httpConn.setRequestProperty("Host", "uukk6.cn");
         httpConn.setRequestProperty("Origin", "http://uukk6.cn");
-        httpConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");
+        httpConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         httpConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
         httpConn.setRequestProperty("Accept", "application/json, text/javascript, */*; q=0.01");
         httpConn.setRequestProperty("X-Requested-With", "XMLHttpRequest");
     }
     
     private void setKkqwsHeaders(HttpURLConnection httpConn) {
-         // Headers for m.kkqws.com
         httpConn.setRequestProperty("Host", "m.kkqws.com");
         httpConn.setRequestProperty("Origin", "http://m.kkqws.com");
-        // ... other headers
+        httpConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+        httpConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+        httpConn.setRequestProperty("Accept", "application/json, text/javascript, */*; q=0.01");
     }
     
     /**
-     * 优化：带重试机制的HTTP请求
-     * @param request HTTP请求函数
-     * @param operationName 操作名称
-     * @return 请求结果
+     * 设置 Makifx 请求头
+     * 避免 Brotli 压缩，只接受 GZIP 或无压缩
      */
-    private String executeWithRetry(Callable<String> request, String operationName) {
-        Exception lastException = null;
+    private void setMakifxHeaders(HttpURLConnection httpConn) {
+        httpConn.setRequestProperty("Accept", "application/json, text/plain, */*");
+        httpConn.setRequestProperty("Accept-Language", "zh-CN,zh-Hans;q=0.9");
+        httpConn.setRequestProperty("Accept-Encoding", "gzip, deflate"); // 不包含 br（Brotli）
+        httpConn.setRequestProperty("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15");
+        httpConn.setRequestProperty("Referer", "https://sou.makifx.com/");
+        httpConn.setRequestProperty("Origin", "https://sou.makifx.com");
+        httpConn.setRequestProperty("Sec-Fetch-Site", "same-origin");
+        httpConn.setRequestProperty("Sec-Fetch-Mode", "cors");
+        httpConn.setRequestProperty("Sec-Fetch-Dest", "empty");
+        httpConn.setRequestProperty("Connection", "keep-alive");
+        httpConn.setRequestProperty("Cache-Control", "no-cache");
+    }
+    
+    /**
+     * 发送 Makifx 搜索请求
+     */
+    private String sendMakifxRequest(String keyword) throws Exception {
+        // 详细记录原始关键词
+        log.info("Makifx 搜索原始关键词: [{}], 字符长度: {}, UTF-8字节: {}", 
+                keyword, keyword.length(), keyword.getBytes("UTF-8").length);
         
-        for (int i = 0; i < MAX_RETRY_TIMES; i++) {
+        // 执行URL编码
+        String encodedKeyword = URLEncoder.encode(keyword, "UTF-8"); 
+        log.info("Makifx URL编码后: [{}]", encodedKeyword);
+        
+        // 构建完整URL
+        String urlStr = "https://sou.makifx.com/?kw=" + encodedKeyword;
+        log.info("Makifx 请求URL: {}", urlStr);
+        
+        // 验证编码是否正确
+        String decoded = java.net.URLDecoder.decode(encodedKeyword, "UTF-8");
+        log.info("编码验证 - 解码后: [{}], 与原始相同: {}", decoded, keyword.equals(decoded));
+        
+        URL url = new URL(urlStr);
+        HttpURLConnection httpConn = (HttpURLConnection) url.openConnection();
+        
+        // 如果是HTTPS连接，设置SSL参数
+        if (httpConn instanceof HttpsURLConnection) {
+            HttpsURLConnection httpsConn = (HttpsURLConnection) httpConn;
+            configureMakifxSSL(httpsConn);
+        }
+        
+        httpConn.setRequestMethod("GET");
+        httpConn.setConnectTimeout(TIMEOUT_MILLIS);
+        httpConn.setReadTimeout(TIMEOUT_MILLIS);
+        
+        // 设置请求头
+        setMakifxHeaders(httpConn);
+        
+        int responseCode = httpConn.getResponseCode();
+        log.info("Makifx API 响应码: {}, 实际请求URL: {}", responseCode, urlStr);
+        
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+            return handleMakifxResponse(httpConn);
+        } else {
+            log.error("Makifx HTTP请求失败，响应码: {}", responseCode);
+            return "";
+        }
+    }
+    
+    /**
+     * 配置Makifx HTTPS连接的SSL参数
+     */
+    private void configureMakifxSSL(HttpsURLConnection httpsConn) {
+        try {
+            // 创建信任所有证书的TrustManager
+            TrustManager[] trustAllCerts = new TrustManager[] {
+                new X509TrustManager() {
+                    public X509Certificate[] getAcceptedIssuers() { return null; }
+                    public void checkClientTrusted(X509Certificate[] certs, String authType) { }
+                    public void checkServerTrusted(X509Certificate[] certs, String authType) { }
+                }
+            };
+            
+            // 为这个连接创建SSL上下文
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+            
+            // 设置SSL Socket Factory和Hostname Verifier
+            httpsConn.setSSLSocketFactory(sslContext.getSocketFactory());
+            httpsConn.setHostnameVerifier(new HostnameVerifier() {
+                public boolean verify(String hostname, SSLSession session) {
+                    return true;
+                }
+            });
+            
+            log.debug("Makifx HTTPS连接SSL配置完成");
+            
+        } catch (Exception e) {
+            log.warn("Makifx SSL配置失败，将使用默认设置: {}", e.getMessage());
+        }
+    }
+    
+    /**
+     * 处理 Makifx 响应数据
+     */
+    private String handleMakifxResponse(HttpURLConnection httpConn) throws IOException {
+        InputStream inputStream = httpConn.getInputStream();
+        String contentEncoding = httpConn.getContentEncoding();
+        String contentType = httpConn.getContentType();
+        
+        log.info("Makifx 响应头 - Content-Encoding: {}, Content-Type: {}", contentEncoding, contentType);
+        
+        // 处理压缩格式（GZIP 或 Brotli）
+        if ("gzip".equalsIgnoreCase(contentEncoding)) {
+            inputStream = new GZIPInputStream(inputStream);
+            log.info("检测到 GZIP 压缩，已解压");
+        } else if ("br".equalsIgnoreCase(contentEncoding)) {
+            // Brotli 压缩需要专门的库，这里先记录日志
+            log.warn("Makifx API 使用 Brotli 压缩，需要修改请求头以避免压缩");
+        }
+        
+        try (Scanner scanner = new Scanner(inputStream, "UTF-8")) {
+            String responseContent = scanner.useDelimiter("\\A").hasNext() ? scanner.next() : "";
+            log.info("Makifx 原始响应长度: {} 字符", responseContent.length());
+            
+            // 输出响应内容的前500个字符用于调试
+            if (responseContent.length() > 0) {
+                String preview = responseContent.length() > 500 ? 
+                    responseContent.substring(0, 500) + "..." : responseContent;
+                log.info("Makifx 响应预览: {}", preview);
+            }
+            
+            return responseContent;
+        }
+    }
+    
+    /**
+     * 格式化 Makifx 搜索结果
+     */
+    private String formatMakifxResult(String jsonResponse, String keyword) {
+        try {
+            // 检查响应内容是否为空或异常
+            if (StrUtil.isBlank(jsonResponse)) {
+                log.warn("Makifx API 返回空响应");
+                return "API 返回空响应";
+            }
+            
+            // 检查是否是HTML响应（可能是错误页面）
+            if (jsonResponse.trim().startsWith("<")) {
+                log.warn("Makifx API 返回HTML页面，可能被限制访问");
+                return "搜索服务暂时不可用，请稍后再试";
+            }
+            
+            // 尝试解析JSON
+            MakifxResponse response;
             try {
-                String result = request.call();
-                if (!result.isEmpty() && !isInvalidResult(result)) {
-                    return result;
-                }
-                log.warn("{} 第 {} 次尝试获取到无效结果", operationName, i + 1);
-            } catch (Exception e) {
-                lastException = e;
-                log.warn("{} 第 {} 次尝试失败: {}", operationName, i + 1, e.getMessage());
+                response = JsonUtils.fromJson(jsonResponse, MakifxResponse.class);
+            } catch (Exception jsonError) {
+                log.error("JSON解析失败，尝试检查响应格式: {}", jsonError.getMessage());
                 
-                if (i < MAX_RETRY_TIMES - 1) {
-                    try {
-                        // 指数退避：第1次500ms，第2次1000ms
-                        Thread.sleep(500 * (i + 1));
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
+                // 如果是数组格式，尝试处理
+                if (jsonResponse.trim().startsWith("[")) {
+                    return handleMakifxArrayResponse(jsonResponse, keyword);
                 }
+                
+                // 如果包含乱码，可能是编码问题
+                if (jsonResponse.contains("�")) {
+                    log.error("响应内容包含乱码，可能是编码或压缩问题");
+                    return "响应数据编码异常，无法解析";
+                }
+                
+                throw jsonError;
+            }
+            
+            if (response == null || response.getCode() != 0 || response.getData() == null) {
+                log.warn("Makifx API 返回异常响应: code={}, data=null", 
+                        response != null ? response.getCode() : "null");
+                return "API 返回数据异常";
+            }
+            
+            return formatMakifxData(response.getData(), keyword);
+            
+        } catch (Exception e) {
+            log.error("格式化 Makifx 搜索结果失败，关键词: {}, 错误: {}", keyword, e.getMessage());
+            log.error("错误的响应内容前500字符: {}", 
+                     jsonResponse.length() > 500 ? jsonResponse.substring(0, 500) + "..." : jsonResponse);
+            return "结果解析失败: " + e.getMessage();
+        }
+    }
+    
+    /**
+     * 处理数组格式的Makifx响应
+     */
+    private String handleMakifxArrayResponse(String jsonResponse, String keyword) {
+        try {
+            log.info("尝试处理数组格式的Makifx响应");
+            // 简单的数组处理，提取URL链接
+            List<String> urls = extractUrlsFromText(jsonResponse);
+            if (urls.isEmpty()) {
+                return "未找到有效链接";
+            }
+            
+            StringBuilder result = new StringBuilder();
+            result.append(String.format("🔍 搜索关键词: %s\n", keyword));
+            result.append(String.format("📊 找到 %d 个链接\n\n", urls.size()));
+            
+            for (int i = 0; i < Math.min(urls.size(), 20); i++) {
+                result.append(String.format("%d. %s\n", i + 1, urls.get(i)));
+            }
+            
+            if (urls.size() > 20) {
+                result.append(String.format("\n... 还有 %d 个链接", urls.size() - 20));
+            }
+            
+            return result.toString();
+            
+        } catch (Exception e) {
+            log.error("处理数组格式响应失败: {}", e.getMessage());
+            return "无法解析数组格式响应";
+        }
+    }
+    
+    /**
+     * 从文本中提取URL链接
+     */
+    private List<String> extractUrlsFromText(String text) {
+        List<String> urls = new ArrayList<>();
+        Pattern urlPattern = Pattern.compile("https?://[^\\s\"'<>]+");
+        Matcher matcher = urlPattern.matcher(text);
+        
+        while (matcher.find()) {
+            String url = matcher.group();
+            if (url.length() > 10 && !urls.contains(url)) {
+                urls.add(url);
             }
         }
         
-        log.error("{} 经过 {} 次重试后仍然失败", operationName, MAX_RETRY_TIMES, lastException);
-        return "";
+        return urls;
     }
+    
     /**
-     * 优化：使用重试机制创建搜索Future
+     * 格式化标准的Makifx数据
      */
-    private CompletableFuture<String> createSearchFuture(Callable<String> task, String operationName) {
-        return CompletableFuture.supplyAsync(() -> executeWithRetry(task, operationName), executorService);
-    }
-
-    private boolean isInvalidResult(String result) {
-        return result == null || result.contains("此链接失效，请返回首页");
+    private String formatMakifxData(MakifxData data, String keyword) {
+        if (data.getTotal() == 0 || data.getMerged_by_type() == null || data.getMerged_by_type().isEmpty()) {
+            return "未找到相关资源";
+        }
+        
+        StringBuilder result = new StringBuilder();
+        result.append(String.format("🔍 搜索关键词: %s\n", keyword));
+        result.append(String.format("📊 总计找到: %d 个资源\n\n", data.getTotal()));
+        
+        Map<String, List<MakifxItem>> mergedByType = data.getMerged_by_type();
+        
+        // 按平台分类显示（根据实际API响应调整）
+        String[] platforms = {"xunlei", "quark", "baidu", "magnet", "aliyun", "others"};
+        String[] platformNames = {"🚀 迅雷网盘", "⚡ 夸克网盘", "☁️ 百度网盘", "🧲 磁力链接", "☁️ 阿里云盘", "🔗 其他资源"};
+        
+        for (int i = 0; i < platforms.length; i++) {
+            List<MakifxItem> items = mergedByType.get(platforms[i]);
+            if (items != null && !items.isEmpty()) {
+                result.append(String.format("%s (%d个)\n", platformNames[i], items.size()));
+                result.append("─────────────────────\n");
+                
+                for (int j = 0; j < items.size() && j < 8; j++) { // 每个平台最多显示8个
+                    MakifxItem item = items.get(j);
+                    result.append(String.format("%d. %s\n", j + 1, item.getUrl()));
+                    
+                    if (StrUtil.isNotBlank(item.getPassword())) {
+                        result.append(String.format("   🔑 提取码: %s\n", item.getPassword()));
+                    }
+                    
+                    if (StrUtil.isNotBlank(item.getNote()) && item.getNote().length() <= 80) {
+                        result.append(String.format("   📝 备注: %s\n", item.getNote().trim()));
+                    }
+                    
+                    result.append("\n");
+                }
+                
+                if (items.size() > 8) {
+                    result.append(String.format("   ... 还有 %d 个资源\n", items.size() - 8));
+                }
+                
+                result.append("\n");
+            }
+        }
+        
+        String finalResult = result.toString().trim();
+        log.info("Makifx 搜索完成，关键词: {}, 结果长度: {} 字符", keyword, finalResult.length());
+        return finalResult;
     }
 }

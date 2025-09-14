@@ -16,7 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * 搜索控制器测试类
  */
-@WebMvcTest(SearchContoller.class)
+@WebMvcTest(SearchController.class)
 class SearchContollerTest {
 
     @Autowired
